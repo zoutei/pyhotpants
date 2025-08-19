@@ -1,0 +1,26 @@
+[build-system]
+requires = [
+  "setuptools>=61.0",
+  "wheel",
+  "numpy>=1.15.0"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hotpants"
+version = "1.0.0"
+description = "Python wrapper for the HOTPANTS image differencing software"
+readme = "README.md"
+authors = [
+  { name = "Koji Shukawa, Andrew Becker (original C code), Python wrapper implementation", email="kshukawa@stsci.edu"},
+]
+
+requires-python = ">=3.6"
+dependencies = [
+  "numpy>=1.15.0",
+  "astropy>=3.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/zoutei/hotpants_python"
+Issues = "https://github.com/zoutei/hotpants_python/issues"

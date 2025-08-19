@@ -1,0 +1,7 @@
+build/
+build_wheels/
+.eggs/
+.vscode/
+*.egg-info/
+*.pyc
+*.so
