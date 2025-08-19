@@ -1,5 +1,3 @@
-#include <fitsio.h>
-
 /* Alard.c */
 void        getKernelVec();
 int         fillStamp(stamp_struct *, float *, float *);
@@ -46,21 +44,21 @@ void        freeStampMem(stamp_struct *, int);
 float       *makeNoiseImage4(float *, float, float);
 void        getKernelInfo(char *);
 void        readKernel(char *, int, double **, double **, int *, int *, int *, int *, double *, double *, double *, double *, double *, int *);
-void        fits_get_kernel_btbl(fitsfile *, double **, int);
+// void        fits_get_kernel_btbl(fitsfile *, double **, int);  // Commented out for library version
 void        spreadMask(int *, int);
 void        makeInputMask(float *, float *, int *);
 void        makeOutputMask(float *, float, float, float *, float, float, int *, int *, int *);
-int         hp_fits_copy_header(fitsfile *, fitsfile *, int *);
-void        hp_fits_correct_data(float *, int, float, float, int);
-void        hp_fits_correct_data_int(int *, int, float, float, int);
-int         hp_fits_write_subset(fitsfile *, long, long, long *,
-                                 float *, int *,
-                                 int, float, float,
-                                 int, int, int, int, int, int);
-int         hp_fits_write_subset_int(fitsfile *, long, long, long *,
-				     int *, int *,
-				     int, float, float,
-				     int, int, int, int, int, int);
+// int         hp_fits_copy_header(fitsfile *, fitsfile *, int *);  // Commented out for library version
+// void        hp_fits_correct_data(float *, int, float, float, int);  // Commented out for library version
+// void        hp_fits_correct_data_int(int *, int, float, float, int);  // Commented out for library version
+// int         hp_fits_write_subset(fitsfile *, long, long, long *,  // Commented out for library version
+//                                 float *, int *,  // Commented out for library version
+//                                 int, float, float,  // Commented out for library version
+//                                 int, int, int, int, int, int);  // Commented out for library version
+// int         hp_fits_write_subset_int(fitsfile *, long, long, long *,  // Commented out for library version
+//				     int *, int *,  // Commented out for library version
+//				     int, float, float,  // Commented out for library version
+//				     int, int, int, int, int, int);  // Commented out for library version
 void        fset(float *, double, int, int);
 void        dfset(double *, double, int, int);
 void        printError(int);

@@ -3,7 +3,6 @@
 #include<math.h>
 // #include<malloc.h>
 #include<stdlib.h>
-#include<fitsio.h>
 #include<ctype.h>
 
 #include "defaults.h"
@@ -1179,21 +1178,21 @@ float *makeNoiseImage4(float *iData, float invGain, float quad) {
     return nData;
 }
 
+// Commented out FITS-dependent function for library version
+/*
 void getKernelInfo(char *kimage) {
-    /*****************************************************
-     Get all 1-time info from kernel fits header, overriding defaults
-      and command line options.
-    *****************************************************/
+    // This function has been disabled for the library version
+    // since it depends on FITS I/O which is now handled in Python
     
     fitsfile *kPtr;
     int i, existsTable, status = 0;
     char hKeyword[1024];
     
-    /* open the input kernel image */
+    // open the input kernel image
     if ( fits_open_file(&kPtr, kimage, 0, &status) )
         printError(status);
     
-    /* required keyword in primary HDU */
+    // required keyword in primary HDU
     if ( fits_read_key_log(kPtr, "KERINFO", &existsTable, NULL, &status) )
         printError(status);
     
@@ -1203,7 +1202,7 @@ void getKernelInfo(char *kimage) {
         exit(1);
     }
     
-    /* move to binary kernel table... */
+    // move to binary kernel table...
     if ( fits_get_num_hdus(kPtr, &existsTable, &status) ||
          fits_movabs_hdu(kPtr, existsTable, NULL, &status) ||
          fits_read_key(kPtr, TINT,    "NGAUSS", &ngauss, NULL, &status) ||
@@ -1215,14 +1214,14 @@ void getKernelInfo(char *kimage) {
     deg_fixe    = (int *)realloc(deg_fixe,      ngauss*sizeof(int));
     sigma_gauss = (float *)realloc(sigma_gauss, ngauss*sizeof(float));
     
-    /* this took a while to figure out! */
+    // this took a while to figure out!
     photNormalize = (char *)malloc(1*sizeof(char));
     
     sprintf(hKeyword, "PHOTNORM");
     if (fits_read_key(kPtr, TSTRING, hKeyword, photNormalize, NULL, &status))
         printError(status);
     
-    /* read kernel gaussian info */
+    // read kernel gaussian info
     for (i = 0; i < ngauss; i++) {
         sprintf(hKeyword, "DGAUSS%d", i+1);
         if (fits_read_key(kPtr, TINT, hKeyword, &deg_fixe[i], NULL, &status))
@@ -1231,7 +1230,7 @@ void getKernelInfo(char *kimage) {
         if (fits_read_key(kPtr, TFLOAT, hKeyword, &sigma_gauss[i], NULL, &status))
             printError(status);
         
-        /* important! */
+        // important!
         sigma_gauss[i] = (1.0/(2.0*sigma_gauss[i]*sigma_gauss[i]));
     }
     
@@ -1240,45 +1239,47 @@ void getKernelInfo(char *kimage) {
     
     return;
 }
+*/
 
-
+// Commented out additional FITS-dependent functions for library version
+/*
 void readKernel(char *kimage, int nRegion, double **tKerSol, double **iKerSol,
                 int *rXMin, int *rXMax, int *rYMin, int *rYMax,
                 double *meansigSubstamps, double *scatterSubstamps,
                 double *meansigSubstampsF, double *scatterSubstampsF,
                 double *diffrat, int *NskippedSubstamps) {
-    /* read in kernel image for region */
+    // read in kernel image for region
     
     fitsfile *kPtr;
     int status = 0;
     char hKeyword[1024], hInfo[1024];
     
-    /* open the input kernel image */
+    // open the input kernel image
     if ( fits_open_file(&kPtr, kimage, 0, &status) )
         printError(status);
     
-    /* grab stuff for this region */
+    // grab stuff for this region
     sprintf(hKeyword, "REGION%02d", nRegion);
     if (fits_read_key(kPtr, TSTRING, hKeyword, &hInfo, NULL, &status))
         printError(status);
     
-    /* get extent of region */
+    // get extent of region
     if (sscanf(hInfo, "[%d:%d,%d:%d]", rXMin, rXMax, rYMin, rYMax) != 4) {
         fprintf(stderr, "Problem with region %d (%s), exiting...\n", nRegion, hInfo);
         exit(1);
     }
-    /* fits indexing starts at 1, code at 0 */
+    // fits indexing starts at 1, code at 0
     *rXMin -= 1;
     *rXMax -= 1;
     *rYMin -= 1;
     *rYMax -= 1;
     
-    /* which way to convolve */
+    // which way to convolve
     sprintf(hKeyword, "CONVOL%02d", nRegion);
     if (fits_read_key(kPtr, TSTRING, hKeyword, &hInfo, NULL, &status))
         printError(status);
     
-    /* copy quality control stuff: mean sigma, scatter, # substamps skipped */
+    // copy quality control stuff: mean sigma, scatter, # substamps skipped
     sprintf(hKeyword, "SSSIG%02d", nRegion);
     if (fits_read_key(kPtr, TDOUBLE, hKeyword, meansigSubstamps, NULL, &status))
         printError(status);
@@ -1295,7 +1296,7 @@ void readKernel(char *kimage, int nRegion, double **tKerSol, double **iKerSol,
     if (fits_read_key(kPtr, TDOUBLE, hKeyword, scatterSubstampsF, NULL, &status))
         printError(status);
     
-    /* sometimes does not exist */
+    // sometimes does not exist
     sprintf(hKeyword, "NSCALO%02d", nRegion);
     if (fits_read_key(kPtr, TDOUBLE, hKeyword, diffrat, NULL, &status)) {
         *diffrat = 1;
@@ -1324,7 +1325,7 @@ void readKernel(char *kimage, int nRegion, double **tKerSol, double **iKerSol,
 void fits_get_kernel_btbl(fitsfile *kPtr, double **kernelSol, int nRegion) {
     int status=0, existsTable;
     
-    /* move to binary kernel table... */
+    // move to binary kernel table...
     if ( fits_get_num_hdus(kPtr, &existsTable, &status) ||
          fits_movabs_hdu(kPtr, existsTable, NULL, &status) )
         printError(status);
@@ -1333,14 +1334,14 @@ void fits_get_kernel_btbl(fitsfile *kPtr, double **kernelSol, int nRegion) {
     if (fits_read_col(kPtr, TDOUBLE, nRegion+1, 1, 1, (nCompTotal+1), 0, *kernelSol, 0, &status))
         printError(status);
     
-    /*
-      fprintf(stderr, "OK %d, %f %f %f %f %f %f\n", nRegion, *kernelSol[0], *kernelSol[1],
-      *kernelSol[192-1], *kernelSol[293-1],
-      *kernelSol[294-1], *kernelSol[298-1]);
-      */
+    //
+    // fprintf(stderr, "OK %d, %f %f %f %f %f %f\n", nRegion, *kernelSol[0], *kernelSol[1],
+    // *kernelSol[192-1], *kernelSol[293-1],
+    // *kernelSol[294-1], *kernelSol[298-1]);
     
     return;
 }
+*/
 
 
 void spreadMask(int *mData, int width) {
@@ -1397,6 +1398,7 @@ void makeInputMask(float *tData, float *iData, int *mData) {
     return;
 }
 
+/*
 int hp_fits_copy_header(fitsfile *iPtr, fitsfile *oPtr, int *status) {
 #define FSTRNCMP(a,b,n)  ((a)[0]<(b)[0]?-1:(a)[0]>(b)[0]?1:strncmp((a),(b),(n)))   
     int nkeys, i;
@@ -1407,7 +1409,7 @@ int hp_fits_copy_header(fitsfile *iPtr, fitsfile *oPtr, int *status) {
         fits_read_key_lng(iPtr, "NAXIS", &naxis, NULL, status) )
         return *status;
     
-    /* copy remaining keywords, excluding NAXIS?, EXTEND, and reference COMMENT keywords */
+    // copy remaining keywords, excluding NAXIS?, EXTEND, and reference COMMENT keywords
     for (i = 4 + naxis; i <= nkeys; i++) {
         if (fits_read_record(iPtr, i, card, status))
             break;
@@ -1421,7 +1423,9 @@ int hp_fits_copy_header(fitsfile *iPtr, fitsfile *oPtr, int *status) {
     }
     return *status;
 }
+*/
 
+/*
 void hp_fits_correct_data(float *data, int npix, float bZero, float bScale, int makeShort) {
     
     float maxval=1e30, minval=-1e30;
@@ -1429,14 +1433,11 @@ void hp_fits_correct_data(float *data, int npix, float bZero, float bScale, int 
     float *dptr;
     int   *mptr;
     
-    /*
-      BUYER BEWARE : the photometric rescaling of the kernel can take
-      an innocent amount of flux and drive it higher than the allowed
-      short maximum value.  we need to check for this here
-      
-      %%% AND WATCH OUT FOR BSCALE MADNESS... %%%
-      
-    */
+    // BUYER BEWARE : the photometric rescaling of the kernel can take
+    // an innocent amount of flux and drive it higher than the allowed
+    // short maximum value.  we need to check for this here
+    // 
+    // %%% AND WATCH OUT FOR BSCALE MADNESS... %%%
     
     dptr = data;
     mptr = mRData;
@@ -1456,33 +1457,31 @@ void hp_fits_correct_data(float *data, int npix, float bZero, float bScale, int 
             }
         }
     }
-    /* extra check for NaN, probably not necessary */
+    // extra check for NaN, probably not necessary
     
-    /*
-      dptr = data;
-      for (i = 0; i < npix; i++, dptr++) {
-      if (*dptr*0 != 0)
-      *dptr = fillVal;
-      }
-    */
+    //
+    // dptr = data;
+    // for (i = 0; i < npix; i++, dptr++) {
+    // if (*dptr*0 != 0)
+    // *dptr = fillVal;
+    // }
     
     return;
 }
+*/
 
+/*
 void hp_fits_correct_data_int(int *data, int npix, float bZero, float bScale, int makeShort) {
     
     float maxval=1e30, minval=-1e30;
     int   i;
     int  *dptr, *mptr;
     
-    /*
-      BUYER BEWARE : the photometric rescaling of the kernel can take
-      an innocent amount of flux and drive it higher than the allowed
-      short maximum value.  we need to check for this here
-      
-      %%% AND WATCH OUT FOR BSCALE MADNESS... %%%
-      
-    */
+    // BUYER BEWARE : the photometric rescaling of the kernel can take
+    // an innocent amount of flux and drive it higher than the allowed
+    // short maximum value.  we need to check for this here
+    //
+    // %%% AND WATCH OUT FOR BSCALE MADNESS... %%%
     
     dptr = data;
     mptr = mRData;
@@ -1504,7 +1503,9 @@ void hp_fits_correct_data_int(int *data, int npix, float bZero, float bScale, in
     }
     return;
 }
+*/
 
+/*
 int hp_fits_write_subset(fitsfile *fptr, long group, long naxis, long *naxes,
                          float *data, int *status, int makeShort,
                          float bZero, float bScale,
@@ -1523,7 +1524,7 @@ int hp_fits_write_subset(fitsfile *fptr, long group, long naxis, long *naxes,
     lpixel[0] = lpixelX;
     
     dptr = data;
-    /* get to the first row */
+    // get to the first row
     for (y = 0; y < yArrayLo; y++)
         for (x = 0; x < rPixX; x++, dptr++);
     
@@ -1532,18 +1533,20 @@ int hp_fits_write_subset(fitsfile *fptr, long group, long naxis, long *naxes,
         fpixel[1] = fpixelY + y;
         lpixel[1] = fpixel[1];
         
-        /* get to first pixel in row to write */
+        // get to first pixel in row to write
         for (x = 0; x < xArrayLo; x++, dptr++);
         
-        /* this works! */
+        // this works!
         fits_write_subset_flt(fptr, group, naxis, naxes, fpixel, lpixel, dptr, status);
         
-        /* clear the row, as fits_write_subset does not increment dptr */
+        // clear the row, as fits_write_subset does not increment dptr
         for (x = xArrayLo; x < rPixX; x++, dptr++);
     }
     return *status;
 }
+*/
 
+/*
 int hp_fits_write_subset_int(fitsfile *fptr, long group, long naxis, long *naxes,
                              int *data, int *status, int makeShort,
                              float bZero, float bScale,
@@ -1562,7 +1565,7 @@ int hp_fits_write_subset_int(fitsfile *fptr, long group, long naxis, long *naxes
     lpixel[0] = lpixelX;
     
     dptr = data;
-    /* get to the first row */
+    // get to the first row
     for (y = 0; y < yArrayLo; y++)
         for (x = 0; x < rPixX; x++, dptr++);
     
@@ -1571,17 +1574,18 @@ int hp_fits_write_subset_int(fitsfile *fptr, long group, long naxis, long *naxes
         fpixel[1] = fpixelY + y;
         lpixel[1] = fpixel[1];
         
-        /* get to first pixel in row to write */
+        // get to first pixel in row to write
         for (x = 0; x < xArrayLo; x++, dptr++);
         
-        /* this works! */
+        // this works!
         fits_write_subset_int(fptr, group, naxis, naxes, fpixel, lpixel, dptr, status);
         
-        /* clear the row, as fits_write_subset does not increment dptr */
+        // clear the row, as fits_write_subset does not increment dptr
         for (x = xArrayLo; x < rPixX; x++, dptr++);
     }
     return *status;
 }
+*/
 
 void fset(float *data, double value, int nPixX, int nPixY) {
     int    i;
@@ -1599,16 +1603,16 @@ void dfset(double *data, double value, int nPixX, int nPixY) {
         *(d++) = value;
 }
 
+/*
 void printError(int status) {
-    /*****************************************************/
-    /* Print out cfitsio error messages and exit program */
-    /*****************************************************/
+    // Print out cfitsio error messages and exit program
     if (status) {
-        fits_report_error(stderr, status); /* print error report */
-        exit( status );    /* terminate the program, returning error status */
+        fits_report_error(stderr, status); // print error report
+        exit( status );    // terminate the program, returning error status
     }
     return;
 }
+*/
 
 #define M1 259200
 #define IA1 7141
