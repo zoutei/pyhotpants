@@ -19,6 +19,7 @@ def _get_ext():
     global hotpants_ext
     if hotpants_ext is None:
         try:
+            # This relative import assumes the compiled C extension is in the same package
             from . import hotpants_ext as ext_module
 
             hotpants_ext = ext_module
@@ -43,11 +44,11 @@ class HotpantsConfig:
 
     def __init__(self, **kwargs):
         # Image-specific parameters
-        # [-tu tuthresh]    : upper valid data count, template (25000)
-        self.tuthresh = kwargs.get("tuthresh", 25000.0)
+        # [-tu tuthresh]    : upper valid data count, template (max value in template)
+        self.tuthresh = kwargs.get("tuthresh", None)
         # [-tuk tucthresh]  : upper valid data count for kernel, template (tuthresh)
         self.tuktresh = kwargs.get("tuktresh", None)
-        # [-tl tlthresh]    : lower valid data count, template (0)
+        # [-tl tlthresh]    : lower valid data count, template (min value in template)
         self.tlthresh = kwargs.get("tlthresh", 0.0)
         # [-tg tgain]       : gain in template (1)
         self.tgain = kwargs.get("tgain", 1.0)
@@ -55,12 +56,12 @@ class HotpantsConfig:
         self.trdnoise = kwargs.get("trdnoise", 0.0)
         # [-tp tpedestal]   : ADU pedestal in template (0)
         self.tpedestal = kwargs.get("tpedestal", 0.0)
-        # [-iu iuthresh]    : upper valid data count, image (25000)
-        self.iuthresh = kwargs.get("iuthresh", 25000.0)
+        # [-iu iuthresh]    : upper valid data count, image (max value in image)
+        self.iuthresh = kwargs.get("iuthresh", None)
         # [-iuk iucthresh]  : upper valid data count for kernel, image (iuthresh)
         self.iuktresh = kwargs.get("iuktresh", None)
-        # [-il ilthresh]    : lower valid data count, image (0)
-        self.ilthresh = kwargs.get("ilthresh", 0.0)
+        # [-il ilthresh]    : lower valid data count, image (min value in image)
+        self.ilthresh = kwargs.get("ilthresh", None)
         # [-ig igain]       : gain in image (1)
         self.igain = kwargs.get("igain", 1.0)
         # [-ir irdnoise]    : e- readnoise in image (0)
@@ -77,7 +78,7 @@ class HotpantsConfig:
         self.bgo = kwargs.get("bgo", 1)
         # [-ft fitthresh]   : RMS threshold for good centroid in kernel fit (20.0)
         self.fitthresh = kwargs.get("fitthresh", 20.0)
-        # [-sft scale]      : scale fitthresh by this fraction if... (0.5)
+        # # [-sft scale]      : scale fitthresh by this fraction if... (0.5)
         self.scale_fitthresh = kwargs.get("scale_fitthresh", 0.5)
         # [-nft fraction]   : this fraction of stamps are not filled (0.1)
         self.min_frac_stamps = kwargs.get("min_frac_stamps", 0.1)
@@ -123,13 +124,21 @@ class HotpantsConfig:
         # [-nsy ystamp]     : number of each region's stamps in y dimension (10)
         self.nstampy = kwargs.get("nstampy", 10)
 
-        # Derived values for C code (for convenience)
+        # Derived values for C code
         self.hwkernel = self.rkernel
         self.hwksstamp = self.rss
         self.fwkernel = 2 * self.hwkernel + 1
         self.fwksstamp = 2 * self.hwksstamp + 1
-        self.fwstamp = self.hwksstamp * 2 + 1 + self.hwkernel * 2 + 1
-        self.ncomp_ker = 0
+
+        _nx = kwargs.get("nx", 2048)
+        _ny = kwargs.get("ny", 2048)
+
+        # This calculation mirrors the logic in main.c to estimate stamp width
+        fwstamp_est = min(_nx / self.nregx / self.nstampx, _ny / self.nregy / self.nstampy)
+        fwstamp_est -= self.fwkernel
+        fwstamp_est -= 1 if int(fwstamp_est) % 2 == 0 else 0
+        self.fwstamp = int(max(fwstamp_est, self.fwksstamp + self.fwkernel))
+
         # [-ng ngauss]      : number of gaussians which compose kernel (3)
         self.ngauss = 3
         # [-ng ... degree0 .. degreeN] : degree of polynomial associated with gaussian #
@@ -138,9 +147,7 @@ class HotpantsConfig:
         self.sigma_gauss = [0.7, 1.5, 3.0]
         self.ncomp = ((self.ko + 1) * (self.ko + 2)) // 2
         self.n_bg_vectors = ((self.bgo + 1) * (self.bgo + 2)) // 2
-
-        for i in range(self.ngauss):
-            self.ncomp_ker += ((self.deg_fixe[i] + 1) * (self.deg_fixe[i] + 2)) // 2
+        self.ncomp_ker = sum(((d + 1) * (d + 2)) // 2 for d in self.deg_fixe)
         self.n_comp_total = self.ncomp_ker * self.ncomp + self.n_bg_vectors
 
         if self.tuktresh is None:
@@ -149,12 +156,12 @@ class HotpantsConfig:
             self.iuktresh = self.iuthresh
 
     def to_dict(self) -> Dict[str, Any]:
-        """
-        Convert config to a dictionary for passing to the C extension.
-        This also handles the case where `deg_fixe` or `sigma_gauss` might
-        not be set, though they should be.
-        """
+        """Convert config to a dictionary for passing to the C extension."""
         d = self.__dict__.copy()
+        # These are Python-only and not needed by the C extension
+        d.pop("_nx", None)
+        d.pop("_ny", None)
+        # Ensure lists are passed correctly
         d["deg_fixe"] = list(d["deg_fixe"])
         d["sigma_gauss"] = list(d["sigma_gauss"])
         return d
@@ -174,11 +181,12 @@ class Hotpants:
         i_mask: Optional[np.ndarray] = None,
         t_error: Optional[np.ndarray] = None,
         i_error: Optional[np.ndarray] = None,
-        star_catalog: Optional[List[Tuple[float, float]]] = None,
+        star_catalog: Optional[np.ndarray] = None,
         config: Optional[HotpantsConfig] = None,
     ):
         """
         Initializes the Hotpants object with template and image data.
+        This now also creates the initial masks and noise images.
 
         Args:
             template_data (np.ndarray): The template image data.
@@ -187,35 +195,75 @@ class Hotpants:
             i_mask (np.ndarray, optional): An optional mask for the image.
             t_error (np.ndarray, optional): An optional error/noise image for the template.
             i_error (np.ndarray, optional): An optional error/noise image for the image.
-            star_catalog (List[Tuple[float, float]], optional): A pre-existing list of
+            star_catalog (np.ndarray, optional): A pre-existing array of
                 star positions to use for kernel fitting, bypassing the stamp search.
             config (HotpantsConfig, optional): A custom configuration object.
         """
         self.ext = _get_ext()
-
         self._validate_images(template_data, image_data, "template and image")
 
         self.template_data = np.ascontiguousarray(template_data, dtype=np.float32)
         self.image_data = np.ascontiguousarray(image_data, dtype=np.float32)
         self.ny, self.nx = self.template_data.shape
 
-        if t_mask is not None:
-            self._validate_images(template_data, t_mask, "template and template mask")
-        if i_mask is not None:
-            self._validate_images(image_data, i_mask, "image and image mask")
-
-        self.config = config if config is not None else HotpantsConfig()
-
-        # Create a single C state object to hold all C-level state
-        self._c_state = self.ext.HotpantsState(self.nx, self.ny, self.config.to_dict())
-
-        self._t_mask_input = t_mask
-        self._i_mask_input = i_mask
+        self.config = config if config is not None else HotpantsConfig(nx=self.nx, ny=self.ny)
         self._t_error_input = t_error
         self._i_error_input = i_error
-        self._star_catalog_input = star_catalog
+
+        if star_catalog is not None:
+            if not isinstance(star_catalog, np.ndarray) or star_catalog.ndim != 2 or star_catalog.shape[1] != 2:
+                raise HotpantsError("star_catalog must be a 2D NumPy array with shape (N, 2).")
+            self.star_catalog = np.ascontiguousarray(star_catalog, dtype=np.float32)
+        else:
+            self.star_catalog = None
 
         self.results = {}
+
+        # Dynamically set thresholds if not provided
+        if self.config.tuthresh is None:
+            self.config.tuthresh = np.max(self.template_data)
+        if self.config.tuktresh is None:
+            self.config.tuktresh = self.config.tuthresh
+        if self.config.tlthresh is None:
+            self.config.tlthresh = np.min(self.template_data)
+        if self.config.iuthresh is None:
+            self.config.iuthresh = np.max(self.image_data)
+        if self.config.iuktresh is None:
+            self.config.iuktresh = self.config.iuthresh
+        if self.config.ilthresh is None:
+            self.config.ilthresh = np.min(self.image_data)
+
+        # Initialize C state object and pre-compute masks and noise images
+        self._c_state = self.ext.HotpantsState(self.nx, self.ny, self.config.to_dict())
+
+        # --- NEW LOGIC: Pass external masks to the C function directly for proper combination ---
+
+        # 1. Create the initial input mask from the images and C extension.
+        # Pass the external masks directly to the C function.
+        # The C function will handle validation.
+        input_mask = self.ext.make_input_mask(self._c_state, self.template_data, self.image_data, t_mask, i_mask)
+
+        self.results["input_mask"] = input_mask
+
+        # 2. Generate noise images using C extension if not provided by the user.
+        if self._t_error_input is not None:
+            # Use user-provided noise image, squared.
+            t_noise_sq = np.ascontiguousarray(self._t_error_input**2, dtype=np.float32)
+        else:
+            # Generate noise image from scratch and square it.
+            t_noise_sq = self.ext.calculate_noise_image(self._c_state, self.template_data, is_template=True)
+
+        if self._i_error_input is not None:
+            # Use user-provided noise image, squared.
+            i_noise_sq = np.ascontiguousarray(self._i_error_input**2, dtype=np.float32)
+        else:
+            # Generate noise image from scratch and square it.
+            i_noise_sq = self.ext.calculate_noise_image(self._c_state, self.image_data, is_template=False)
+
+        # 3. Store the squared noise images for later use.
+        self.results["t_noise_sq"] = t_noise_sq
+        self.results["i_noise_sq"] = i_noise_sq
+        # ---------------------------------------------------------------
 
     def __del__(self):
         """Ensures the C state object is properly deallocated."""
@@ -230,177 +278,107 @@ class Hotpants:
         if a1.shape != a2.shape:
             raise HotpantsError(f"{names} must have the same dimensions")
 
-    def find_stamps(self) -> List[Tuple[float, float]]:
+    def find_stamps(self) -> Tuple[List[Dict], List[Dict]]:
         """
         Step 1: Finds potential stamps for kernel fitting.
-        Uses a stamp finding algorithm or a pre-defined star catalog.
+        This method now dispatches to the C extension function with the appropriate
+        parameters based on whether a star catalog is provided.
 
         Returns:
             List[Tuple[float, float]]: A list of (x, y) coordinates for the found stamps.
         """
-        config_dict = self.config.to_dict()
-        fit_thresh = self.config.fitthresh
-        attempts = 0
-        all_stamps = []
+        # fit_thresh = self.config.fitthresh
+        # attempts = 0
+        # all_stamps = []
+        # input_mask = self.results["input_mask"]
 
-        # Create initial mask
-        input_mask = self.ext.make_input_mask(self._c_state, self.template_data, self.image_data)
-        # Incorporate provided external masks if they exist
-        if self._t_mask_input is not None:
-            input_mask |= np.ascontiguousarray(self._t_mask_input, dtype=np.int32)
-        if self._i_mask_input is not None:
-            input_mask |= np.ascontiguousarray(self._i_mask_input, dtype=np.int32)
-        self.results["input_mask"] = input_mask
+        # # This loop now handles both catalog-based and automated stamp finding
+        # while attempts < 2:
+        #     if attempts > 0 and self.config.verbose >= 1:
+        #         print(f"Attempt {attempts + 1}: Too few stamps, scaling down threshold to {fit_thresh}")
 
-        while attempts < 2:
-            if attempts > 0 and self.config.verbose >= 1:
-                print(f"Attempt {attempts + 1}: Too few stamps, scaling down threshold to {fit_thresh}")
+        t_stamps, i_stamps = self.ext.find_stamps(self._c_state, self.template_data, self.image_data, self.results["input_mask"], self.config.fitthresh, self.star_catalog)
 
-            if self._star_catalog_input is not None:
-                # Use provided star catalog, but filter them with the mask
-                all_stamps = [(x, y) for x, y in self._star_catalog_input if input_mask[int(y), int(x)] == 0]
-                if self.config.verbose >= 1:
-                    print(f"Using {len(all_stamps)} stamps from provided catalog.")
-                break
-            else:
-                all_stamps = self.ext.find_stamps(
-                    self._c_state,
-                    self.template_data,
-                    self.image_data,
-                    input_mask,
-                    fit_thresh,
-                )
+        num_t_stamps = len(t_stamps)
+        num_i_stamps = len(i_stamps)
 
-            if len(all_stamps) / (self.config.nstampx * self.config.nstampy) >= self.config.min_frac_stamps:
-                if self.config.verbose >= 1:
-                    print(f"Found {len(all_stamps)} stamps, enough to proceed.")
-                break
+        if self.config.verbose >= 1:
+            print(f"Found {num_t_stamps} template stamps and {num_i_stamps} image stamps.")
 
-            fit_thresh *= self.config.scale_fitthresh
-            attempts += 1
-
-        if len(all_stamps) == 0:
+        if num_t_stamps == 0 and num_i_stamps == 0:
             raise HotpantsError("No valid stamps found for kernel fitting.")
 
-        self.results["all_stamps"] = all_stamps
-        return all_stamps
+        self.results["t_stamps_data"] = t_stamps
+        self.results["i_stamps_data"] = i_stamps
+        return t_stamps, i_stamps
 
-    def fit_and_select_direction(self) -> Tuple[str, List[Dict[str, Any]]]:
+    def fit_and_select_direction(self) -> Tuple[str, List[Dict]]:
         """
         Step 2: Performs initial kernel fits for both convolution directions and selects
         the best one based on the figure of merit.
+
+        NOTE: This function no longer creates noise images. It uses the ones
+        created in the __init__ function.
 
         Returns:
             Tuple[str, List[Dict[str, Any]]]: The chosen convolution direction ('t' or 'i')
                 and the list of best-fit stamps with their figure of merit.
         """
-        if "all_stamps" not in self.results:
+        if "t_stamps_data" not in self.results:
             self.find_stamps()
 
-        # Generate noise images if not provided by the user
-        if self._t_error_input is not None:
-            t_error_sq = np.ascontiguousarray(self._t_error_input**2, dtype=np.float32)
-        else:
-            t_error_sq = self.ext.calculate_noise_image(self._c_state, self.template_data, is_template=True)
-
-        if self._i_error_input is not None:
-            i_error_sq = np.ascontiguousarray(self._i_error_input**2, dtype=np.float32)
-        else:
-            i_error_sq = self.ext.calculate_noise_image(self._c_state, self.image_data, is_template=False)
-
-        combined_error_sq = t_error_sq + i_error_sq
-        self.results["combined_error_sq"] = combined_error_sq
+        combined_error_sq = self.results["t_noise_sq"] + self.results["i_noise_sq"]
 
         conv_direction = self.config.force_convolve
-        if self.config.force_convolve == "b":
-            t_fits, t_fom = self.ext.fit_stamps_and_get_fom(self._c_state, self.template_data, self.image_data, combined_error_sq, "t", self.results["all_stamps"])
-            i_fits, i_fom = self.ext.fit_stamps_and_get_fom(self._c_state, self.image_data, self.template_data, combined_error_sq, "i", self.results["all_stamps"])
-
+        if conv_direction == "b":
+            t_fits, t_fom = self.ext.fit_stamps_and_get_fom(self._c_state, self.template_data, self.image_data, combined_error_sq, "t", self.results["t_stamps_data"])
+            i_fits, i_fom = self.ext.fit_stamps_and_get_fom(self._c_state, self.image_data, self.template_data, combined_error_sq, "i", self.results["i_stamps_data"])
             conv_direction = "t" if t_fom < i_fom else "i"
             best_fits = t_fits if t_fom < i_fom else i_fits
-
             if self.config.verbose >= 1:
                 print(f"Template FOM: {t_fom:.3f}, Image FOM: {i_fom:.3f}. Convolving: {conv_direction}")
         else:
-            if conv_direction == "t":
-                conv_img, ref_img = self.template_data, self.image_data
-            else:
-                conv_img, ref_img = self.image_data, self.template_data
-            best_fits, _ = self.ext.fit_stamps_and_get_fom(self._c_state, conv_img, ref_img, combined_error_sq, conv_direction, self.results["all_stamps"])
+            stamps_to_fit = self.results["t_stamps_data"] if conv_direction == "t" else self.results["i_stamps_data"]
+            conv_img, ref_img = (self.template_data, self.image_data) if conv_direction == "t" else (self.image_data, self.template_data)
+            best_fits, _ = self.ext.fit_stamps_and_get_fom(self._c_state, conv_img, ref_img, combined_error_sq, conv_direction, stamps_to_fit)
 
         self.results["conv_direction"] = conv_direction
         self.results["best_fits"] = best_fits
-
         return conv_direction, best_fits
 
-    def iterative_fit_and_clip(self) -> List[Dict[str, Any]]:
+    def iterative_fit_and_clip(self) -> Tuple[np.ndarray, List[Dict]]:
         """
-        Step 3: Performs the iterative sigma clipping of stamps based on the final
-        global solution. This process continues until the stamp list converges.
+        Step 3 & 4: Performs iterative clipping of stamps and computes the global kernel solution.
+        This method combines the iterative fitting and final solution calculation,
+        mirroring the behavior of the original `fitKernel` function in HOTPANTS.
 
         Returns:
-            List[Dict[str, Any]]: The final, clipped list of best-fit stamps.
+            Tuple containing:
+                - np.ndarray: The array of global kernel and background coefficients.
+                - List[Dict[str, Any]]: The final, clipped list of best-fit stamps.
         """
-        if "best_fits" not in self.results or "combined_error_sq" not in self.results:
+        if "best_fits" not in self.results:
             self.fit_and_select_direction()
+        if self.config.verbose >= 1:
+            print("Starting iterative kernel fit and solution...")
 
-        iter_count = 0
-        max_iter = 10
-        converged = False
-
-        current_fits = self.results["best_fits"]
-
-        # Use the correct images based on the convolution direction
-        if self.results["conv_direction"] == "t":
+        conv_direction = self.results["conv_direction"]
+        if conv_direction == "t":
             conv_img, ref_img = self.template_data, self.image_data
         else:
             conv_img, ref_img = self.image_data, self.template_data
 
-        while not converged and iter_count < max_iter:
-            if self.config.verbose >= 2:
-                print(f"Starting iterative fit loop, iteration {iter_count + 1}")
+        kernel_solution, final_fits, stats = self.ext.fit_kernel(self._c_state, self.results["best_fits"], conv_img, ref_img, self.results["t_noise_sq"] + self.results["i_noise_sq"], self.results["input_mask"])
 
-            current_fits, skip_count, check_again_needed = self.ext.check_and_refit_stamps(
-                self._c_state,
-                current_fits,
-                conv_img,
-                ref_img,
-                self.results["combined_error_sq"],
-                self.results["conv_direction"],
-            )
-
-            if not check_again_needed:
-                converged = True
-
-            iter_count += 1
-            if len(current_fits) == 0:
-                raise HotpantsError("All stamps were clipped during iterative fitting.")
-
-        if not converged and self.config.verbose >= 1:
-            print("Warning: Stamp filtering did not converge within max iterations.")
-
+        if len(final_fits) == 0:
+            raise HotpantsError("All stamps were clipped during iterative fitting.")
         if self.config.verbose >= 1:
-            print(f"Final fit uses {len(current_fits)} stamps.")
+            print(f"Final fit uses {len(final_fits)} stamps. Fit stats: mean_sig={stats['meansig']:.3f}, scatter={stats['scatter']:.3f}")
 
-        self.results["best_fits"] = current_fits
-        return current_fits
-
-    def get_global_solution(self) -> np.ndarray:
-        """
-        Step 4: Computes the global kernel solution from the final set of stamps.
-
-        Returns:
-            np.ndarray: The array of global kernel and background coefficients.
-        """
-        if "best_fits" not in self.results:
-            self.iterative_fit_and_clip()
-
-        if self.config.verbose >= 1:
-            print("Computing global kernel solution...")
-
-        kernel_solution = self.ext.get_global_solution(self._c_state, self.results["best_fits"])
         self.results["kernel_solution"] = kernel_solution
-        return kernel_solution
+        self.results["final_fits"] = final_fits
+        self.results["fit_stats"] = stats
+        return kernel_solution, final_fits
 
     def convolve_and_difference(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -415,50 +393,38 @@ class Hotpants:
                 - The output mask
         """
         if "kernel_solution" not in self.results:
-            self.get_global_solution()
+            self.iterative_fit_and_clip()
 
         conv_direction = self.results["conv_direction"]
 
-        # Get noise images from inputs or generate them
-        if self._t_error_input is not None:
-            t_noise = np.ascontiguousarray(self._t_error_input, dtype=np.float32)
-        else:
-            t_noise = self.ext.calculate_noise_image(self._c_state, self.template_data, is_template=True)
-
-        if self._i_error_input is not None:
-            i_noise = np.ascontiguousarray(self._i_error_input, dtype=np.float32)
-        else:
-            i_noise = self.ext.calculate_noise_image(self._c_state, self.image_data, is_template=False)
+        # Use the pre-calculated squared noise images
+        t_noise_sq = self.results["t_noise_sq"]
+        i_noise_sq = self.results["i_noise_sq"]
 
         if conv_direction == "t":
             image_to_convolve = self.template_data
             target_image = self.image_data
-            noise_to_convolve_sq = t_noise**2
-            target_noise_sq = i_noise**2
+            noise_to_convolve_sq = t_noise_sq
+            target_noise_sq = i_noise_sq
         else:
             image_to_convolve = self.image_data
             target_image = self.template_data
-            noise_to_convolve_sq = i_noise**2
-            target_noise_sq = t_noise**2
+            noise_to_convolve_sq = i_noise_sq
+            target_noise_sq = t_noise_sq
 
-        convolved_image, output_mask = self.ext.apply_kernel(self._c_state, image_to_convolve, self.results["kernel_solution"])
-
+        convolved_image, output_mask, conv_noise_sq = self.ext.apply_kernel(self._c_state, image_to_convolve, self.results["kernel_solution"], noise_to_convolve_sq)
         bkg = self.ext.get_background_image(self._c_state, convolved_image.shape, self.results["kernel_solution"])
         convolved_image += bkg
 
         diff_image = target_image - convolved_image
-        final_noise = np.sqrt(noise_to_convolve_sq + target_noise_sq)
+        final_noise = np.sqrt(conv_noise_sq + target_noise_sq)
 
         if self.config.rescale_ok:
             if self.config.verbose >= 1:
                 print("Rescaling noise for OK pixels...")
             final_noise = self.ext.rescale_noise_ok(self._c_state, diff_image, final_noise, output_mask)
 
-        self.results["convolved_image"] = convolved_image
-        self.results["output_mask"] = output_mask
-        self.results["diff_image"] = diff_image
-        self.results["noise_image"] = final_noise
-
+        self.results.update({"convolved_image": convolved_image, "output_mask": output_mask, "diff_image": diff_image, "noise_image": final_noise})
         return diff_image, convolved_image, final_noise, output_mask
 
     def get_final_outputs(self) -> Dict[str, Any]:
@@ -468,40 +434,32 @@ class Hotpants:
         """
         if "diff_image" not in self.results:
             self.convolve_and_difference()
-
         if self.config.verbose >= 1:
             print("Applying final masks to outputs and calculating statistics...")
 
-        # Fill masked pixels with `fillval`
-        final_diff = self.results["diff_image"].copy()
-        final_conv = self.results["convolved_image"].copy()
-        final_noise = self.results["noise_image"].copy()
-        output_mask = self.results["output_mask"].copy()
+        final_diff, final_conv, final_noise, output_mask = (self.results["diff_image"].copy(), self.results["convolved_image"].copy(), self.results["noise_image"].copy(), self.results["output_mask"].copy())
+        bad_pixels = output_mask != 0
+        final_diff[bad_pixels] = self.config.fillval
+        final_conv[bad_pixels] = self.config.fillval
+        final_noise[bad_pixels] = self.config.fillval_noise
 
-        final_diff[output_mask != 0] = self.config.fillval
-        final_conv[output_mask != 0] = self.config.fillval
-        final_noise[output_mask != 0] = self.config.fillval_noise
-
-        stats = self.ext.calculate_final_stats(self._c_state, final_diff, final_noise, output_mask)
-        self.results["stats"] = stats
+        self.results["stats"] = self.ext.calculate_final_stats(self._c_state, final_diff, final_noise, output_mask)
 
         return {
             "diff_image": final_diff,
             "convolved_image": final_conv,
             "noise_image": final_noise,
             "output_mask": output_mask,
-            "stats": stats,
+            "stats": self.results["stats"],
             "conv_direction": self.results["conv_direction"],
             "kernel_solution": self.results["kernel_solution"],
+            "fit_stats": self.results.get("fit_stats"),
         }
 
     def run_pipeline(self) -> Dict[str, Any]:
-        """
-        A convenience method to run the entire pipeline in a single call.
-        """
+        """A convenience method to run the entire pipeline in a single call."""
         self.find_stamps()
         self.fit_and_select_direction()
         self.iterative_fit_and_clip()
-        self.get_global_solution()
         self.convolve_and_difference()
         return self.get_final_outputs()
