@@ -11,74 +11,8 @@
 #include <assert.h>
 
 // Include the original hotpants headers
-#include "defaults.h"
 #include "globals.h"
 #include "functions.h"
-
-// Define global variables here since main.c and vargs.c are not compiled.
-// These must be defined exactly as declared in globals.h
-float     tUThresh, tUKThresh, tLThresh, tGain, tRdnoise, tPedestal;
-float     iUThresh, iUKThresh, iLThresh, iGain, iRdnoise, iPedestal;
-int       hwKernel, kerOrder, bgOrder;
-float     kerFitThresh, scaleFitThresh, minFracGoodStamps;
-float     kerSigReject, kerFracMask;
-int       nKSStamps, hwKSStamp;
-int       nRegX, nRegY, nStampX, nStampY;
-char      *forceConvolve, *photNormalize, *figMerit;
-int       rescaleOK;
-float     fillVal, fillValNoise;
-int       verbose;
-int       ngauss, *deg_fixe;
-float     *sigma_gauss;
-int       rPixX, rPixY;
-int       nStamps, nS, nCompKer, nC;
-int       nComp, nCompBG, nBGVectors, nCompTotal;
-int       fwKernel, fwStamp, hwStamp, fwKSStamp, kcStep, *indx;
-float     *temp, *temp2;
-double    *check_stack, *filter_x, *filter_y, **kernel_vec;
-double    **wxy, *kernel_coeffs, *kernel, **check_mat, *check_vec;
-int       *mRData;
-stamp_struct *tStamps;
-stamp_struct *iStamps;
-int       convolveVariance;
-int       usePCA;
-float     **PCA;
-
-// Structure to encapsulate all HOTPANTS state variables
-typedef struct {
-    int nx, ny;
-    float tUThresh, tLThresh, tUKThresh, tGain, tRdnoise, tPedestal;
-    float iUThresh, iLThresh, iUKThresh, iGain, iRdnoise, iPedestal;
-    int hwKernel, kerOrder, bgOrder;
-    float kerFitThresh, kerSigReject, kerFracMask;
-    int nKSStamps, hwKSStamp;
-    int nRegX, nRegY, nStampX, nStampY;
-    char forceConvolve_str[2], photNormalize_str[2], figMerit_str[2];
-    float fillVal, fillValNoise;
-    int verbose;
-    int ngauss;
-    int *deg_fixe;
-    float *sigma_gauss;
-    int rPixX, rPixY;
-    int fwKernel, fwStamp, hwStamp, fwKSStamp;
-    int nStamps, nCompKer, nComp, nBGVectors, nCompTotal;
-    int nC;
-    int cmpFile;
-    int rescaleOK;
-    int convolveVariance;
-    int usePCA;
-    float **PCA;
-    
-    // Pointers to temporary C arrays that need to be managed
-    int *mRData;
-    float *temp, *temp2;
-    double *check_stack, *filter_x, *filter_y, **kernel_vec;
-    double **wxy, *kernel_coeffs, *kernel, **check_mat, *check_vec;
-    stamp_struct *tStamps;
-    stamp_struct *iStamps;
-    int *indx;
-
-} hotpants_state_t;
 
 // Structure to hold hotpants configuration from Python
 typedef struct {
@@ -97,13 +31,12 @@ typedef struct {
     int *deg_fixe;
     float *sigma_gauss;
     int fwkernel, fwksstamp, ncomp_ker, ncomp, n_bg_vectors, n_comp_total;
+    float stat_sig, kf_spread_mask1;
 } hotpants_config_t;
 
 // Helper function declarations
 static int parse_config_dict(PyObject *config_dict, hotpants_config_t *config);
 static void init_hotpants_state(hotpants_state_t *state, int nx, int ny, const hotpants_config_t *config);
-static void set_globals_from_state(hotpants_state_t *state);
-static void unset_globals();
 static void free_hotpants_state(hotpants_state_t *state);
 
 // Python function wrappers
@@ -116,19 +49,18 @@ static PyObject *py_make_input_mask(PyObject *self, PyObject *args) {
     int ny = (int)PyArray_DIM(template_arr, 0);
     int nx = (int)PyArray_DIM(template_arr, 1);
     hotpants_config_t config;
-    parse_config_dict(config_dict_obj, &config);
+    if(parse_config_dict(config_dict_obj, &config) < 0) return NULL;
+
     hotpants_state_t state;
     init_hotpants_state(&state, nx, ny, &config);
-    set_globals_from_state(&state);
     
-    makeInputMask((float*)PyArray_DATA(template_arr), (float*)PyArray_DATA(image_arr), state.mRData);
+    makeInputMask(&state, (float*)PyArray_DATA(template_arr), (float*)PyArray_DATA(image_arr), state.mRData);
     
     npy_intp dims[2] = {ny, nx};
     PyObject* mask_arr = PyArray_SimpleNewFromData(2, dims, NPY_INT32, state.mRData);
     Py_INCREF(mask_arr);
     
     free_hotpants_state(&state);
-    unset_globals();
     return mask_arr;
 }
 
@@ -143,23 +75,21 @@ static PyObject *py_calculate_noise_image(PyObject *self, PyObject *args) {
     int ny = (int)PyArray_DIM(image_arr, 0);
     int nx = (int)PyArray_DIM(image_arr, 1);
     hotpants_config_t config;
-    parse_config_dict(config_dict_obj, &config);
+    if(parse_config_dict(config_dict_obj, &config) < 0) return NULL;
     hotpants_state_t state;
     init_hotpants_state(&state, nx, ny, &config);
-    set_globals_from_state(&state);
     
     float* data = (float*)PyArray_DATA(image_arr);
-    float inv_gain = is_template ? 1.0 / tGain : 1.0 / iGain;
-    float rdnoise = is_template ? tRdnoise / tGain : iRdnoise / iGain;
+    float inv_gain = is_template ? 1.0 / state.tGain : 1.0 / state.iGain;
+    float rdnoise = is_template ? state.tRdnoise / state.tGain : state.iRdnoise / state.iGain;
     
-    float *noise_data = makeNoiseImage4(data, inv_gain, rdnoise);
+    float *noise_data = makeNoiseImage4(&state, data, inv_gain, rdnoise);
     
     npy_intp dims[2] = {ny, nx};
     PyObject* noise_arr = PyArray_SimpleNewFromData(2, dims, NPY_FLOAT32, noise_data);
     Py_INCREF(noise_arr);
     
     free_hotpants_state(&state);
-    unset_globals();
     return noise_arr;
 }
 
@@ -174,60 +104,58 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args) {
     int ny = (int)PyArray_DIM(template_arr, 0);
     int nx = (int)PyArray_DIM(template_arr, 1);
     hotpants_config_t config;
-    parse_config_dict(config_dict_obj, &config);
+    if(parse_config_dict(config_dict_obj, &config) < 0) return NULL;
     hotpants_state_t state;
     init_hotpants_state(&state, nx, ny, &config);
     state.mRData = (int*)PyArray_DATA(input_mask_arr);
-    set_globals_from_state(&state);
-    kerFitThresh = fit_thresh;
+    state.kerFitThresh = fit_thresh;
     
     int niS = 0, ntS = 0;
     int rXMin = 0, rYMin = 0, rXMax = nx - 1, rYMax = ny - 1;
     
-    for (int l = 0; l < nStampY; l++) {
-        for (int k = 0; k < nStampX; k++) {
-            int sXMin = rXMin + (int)(k * (rXMax - rXMin + 1.0) / nStampX);
-            int sYMin = rYMin + (int)(l * (rYMax - rYMin + 1.0) / nStampY);
-            int sXMax = imin(sXMin + fwStamp - 1, rXMax);
-            int sYMax = imin(sYMin + fwStamp - 1, rYMax);
+    for (int l = 0; l < state.nStampY; l++) {
+        for (int k = 0; k < state.nStampX; k++) {
+            int sXMin = rXMin + (int)(k * (rXMax - rXMin + 1.0) / state.nStampX);
+            int sYMin = rYMin + (int)(l * (rYMax - rYMin + 1.0) / state.nStampY);
+            int sXMax = imin(sXMin + state.fwStamp - 1, rXMax);
+            int sYMax = imin(sYMin + state.fwStamp - 1, rYMax);
             
-            tStamps[ntS].sscnt = tStamps[ntS].nss = 0; tStamps[ntS].chi2 = 0.0;
-            iStamps[niS].sscnt = iStamps[niS].nss = 0; iStamps[niS].chi2 = 0.0;
+            state.tStamps[ntS].sscnt = state.tStamps[ntS].nss = 0; state.tStamps[ntS].chi2 = 0.0;
+            state.iStamps[niS].sscnt = state.iStamps[niS].nss = 0; state.iStamps[niS].chi2 = 0.0;
             
-            buildStamps(sXMin, sXMax, sYMin, sYMax, &niS, &ntS, 1, rXMin, rYMin,
-                        iStamps, tStamps, (float*)PyArray_DATA(image_arr),
+            buildStamps(&state, sXMin, sXMax, sYMin, sYMax, &niS, &ntS, 1, rXMin, rYMin,
+                        state.iStamps, state.tStamps, (float*)PyArray_DATA(image_arr),
                         (float*)PyArray_DATA(template_arr), 0.0, 0.0);
             
-            if (!(strncmp(forceConvolve, "i", 1)==0)) { if (tStamps[ntS].nss > 0) ntS += 1; }
-            if (!(strncmp(forceConvolve, "t", 1)==0)) { if (iStamps[niS].nss > 0) niS += 1; }
+            if (!(strncmp(state.forceConvolve_str, "i", 1)==0)) { if (state.tStamps[ntS].nss > 0) ntS += 1; }
+            if (!(strncmp(state.forceConvolve_str, "t", 1)==0)) { if (state.iStamps[niS].nss > 0) niS += 1; }
         }
     }
     
     PyObject* stamp_list = PyList_New(0);
-    if (!stamp_list) { PyErr_SetString(PyExc_MemoryError, "Failed to create Python list"); unset_globals(); return NULL; }
+    if (!stamp_list) { free_hotpants_state(&state); PyErr_SetString(PyExc_MemoryError, "Failed to create Python list"); return NULL; }
 
-    if (!(strncmp(forceConvolve, "i", 1)==0)) {
+    if (!(strncmp(state.forceConvolve_str, "i", 1)==0)) {
         for(int i = 0; i < ntS; ++i) {
-            for(int j=0; j<tStamps[i].nss; j++) {
+            for(int j=0; j<state.tStamps[i].nss; j++) {
                 PyObject* stamp_tuple = PyTuple_New(2);
-                PyTuple_SetItem(stamp_tuple, 0, PyFloat_FromDouble(tStamps[i].xss[j]));
-                PyTuple_SetItem(stamp_tuple, 1, PyFloat_FromDouble(tStamps[i].yss[j]));
+                PyTuple_SetItem(stamp_tuple, 0, PyFloat_FromDouble(state.tStamps[i].xss[j]));
+                PyTuple_SetItem(stamp_tuple, 1, PyFloat_FromDouble(state.tStamps[i].yss[j]));
                 PyList_Append(stamp_list, stamp_tuple);
             }
         }
     }
-    if (!(strncmp(forceConvolve, "t", 1)==0)) {
+    if (!(strncmp(state.forceConvolve_str, "t", 1)==0)) {
         for(int i = 0; i < niS; ++i) {
-            for(int j=0; j<iStamps[i].nss; j++) {
+            for(int j=0; j<state.iStamps[i].nss; j++) {
                 PyObject* stamp_tuple = PyTuple_New(2);
-                PyTuple_SetItem(stamp_tuple, 0, PyFloat_FromDouble(iStamps[i].xss[j]));
-                PyTuple_SetItem(stamp_tuple, 1, PyFloat_FromDouble(iStamps[i].yss[j]));
+                PyTuple_SetItem(stamp_tuple, 0, PyFloat_FromDouble(state.iStamps[i].xss[j]));
+                PyTuple_SetItem(stamp_tuple, 1, PyFloat_FromDouble(state.iStamps[i].yss[j]));
                 PyList_Append(stamp_list, stamp_tuple);
             }
         }
     }
     free_hotpants_state(&state);
-    unset_globals();
     return stamp_list;
 }
 
@@ -240,32 +168,33 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args) {
         return NULL;
     }
     int ny = (int)PyArray_DIM(conv_arr, 0); int nx = (int)PyArray_DIM(conv_arr, 1);
-    hotpants_config_t config; parse_config_dict(config_dict_obj, &config);
-    hotpants_state_t state; init_hotpants_state(&state, nx, ny, &config); set_globals_from_state(&state);
+    hotpants_config_t config; 
+    if(parse_config_dict(config_dict_obj, &config) < 0) return NULL;
+    hotpants_state_t state; init_hotpants_state(&state, nx, ny, &config);
     
     state.mRData = (int*)calloc(nx*ny, sizeof(int)); if(!state.mRData) { free_hotpants_state(&state); PyErr_SetString(PyExc_MemoryError, "Failed to allocate mask"); return NULL; }
     
-    int nS = PyList_Size(stamps_list);
-    stamp_struct* all_stamps = (stamp_struct*)calloc(nS, sizeof(stamp_struct));
-    if (allocateStamps(all_stamps, nS)) { free_hotpants_state(&state); PyErr_SetString(PyExc_MemoryError, "Failed to allocate stamps"); return NULL; }
+    state.nS = PyList_Size(stamps_list);
+    stamp_struct* all_stamps = (stamp_struct*)calloc(state.nS, sizeof(stamp_struct));
+    if (allocateStamps(&state, all_stamps, state.nS)) { free_hotpants_state(&state); PyErr_SetString(PyExc_MemoryError, "Failed to allocate stamps"); return NULL; }
     
-    kernel_vec = (double**)calloc(state.nCompKer, sizeof(double*));
-    for (int i=0; i<state.nCompKer; ++i) kernel_vec[i] = (double*)calloc(state.fwKernel*state.fwKernel, sizeof(double));
-    getKernelVec();
+    state.kernel_vec = (double**)calloc(state.nCompKer, sizeof(double*));
+    for (int i=0; i<state.nCompKer; ++i) state.kernel_vec[i] = (double*)calloc(state.fwKernel*state.fwKernel, sizeof(double));
+    getKernelVec(&state);
 
-    for(int i = 0; i < nS; i++) {
+    for(int i = 0; i < state.nS; i++) {
         PyObject* stamp_tuple = PyList_GetItem(stamps_list, i);
         all_stamps[i].xss[0] = (int)PyFloat_AsDouble(PyTuple_GetItem(stamp_tuple, 0));
         all_stamps[i].yss[0] = (int)PyFloat_AsDouble(PyTuple_GetItem(stamp_tuple, 1));
         all_stamps[i].nss = 1; all_stamps[i].sscnt = 0;
-        fillStamp(&all_stamps[i], (float*)PyArray_DATA(conv_arr), (float*)PyArray_DATA(ref_arr));
+        fillStamp(&state, &all_stamps[i], (float*)PyArray_DATA(conv_arr), (float*)PyArray_DATA(ref_arr));
     }
 
-    double fom = check_stamps(all_stamps, nS, (float*)PyArray_DATA(ref_arr), (float*)PyArray_DATA(noise_arr));
+    double fom = check_stamps(&state, all_stamps, state.nS, (float*)PyArray_DATA(ref_arr), (float*)PyArray_DATA(noise_arr));
 
     PyObject* result_list = PyList_New(0);
-    for(int i = 0; i < nS; i++) {
-        if (all_stamps[i].diff < kerSigReject) {
+    for(int i = 0; i < state.nS; i++) {
+        if (all_stamps[i].diff < state.kerSigReject) {
             PyObject* fit_dict = PyDict_New();
             PyDict_SetItemString(fit_dict, "x", PyFloat_FromDouble(all_stamps[i].xss[all_stamps[i].sscnt]));
             PyDict_SetItemString(fit_dict, "y", PyFloat_FromDouble(all_stamps[i].yss[all_stamps[i].sscnt]));
@@ -274,8 +203,8 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args) {
         }
     }
     
-    freeStampMem(all_stamps, nS); free(all_stamps);
-    free_hotpants_state(&state); unset_globals();
+    freeStampMem(&state, all_stamps, state.nS); free(all_stamps);
+    free_hotpants_state(&state);
     return Py_BuildValue("Od", result_list, fom);
 }
 
@@ -288,40 +217,41 @@ static PyObject *py_check_and_refit_stamps(PyObject *self, PyObject *args) {
         return NULL;
     }
     int ny = (int)PyArray_DIM(conv_arr, 0); int nx = (int)PyArray_DIM(conv_arr, 1);
-    hotpants_config_t config; parse_config_dict(config_dict_obj, &config);
-    hotpants_state_t state; init_hotpants_state(&state, nx, ny, &config); set_globals_from_state(&state);
+    hotpants_config_t config; 
+    if(parse_config_dict(config_dict_obj, &config) < 0) return NULL;
+    hotpants_state_t state; init_hotpants_state(&state, nx, ny, &config);
 
     state.mRData = (int*)calloc(nx*ny, sizeof(int));
-    kernel_vec = (double**)calloc(state.nCompKer, sizeof(double*));
-    for (int i=0; i<state.nCompKer; ++i) kernel_vec[i] = (double*)calloc(state.fwKernel*state.fwKernel, sizeof(double));
-    getKernelVec();
+    state.kernel_vec = (double**)calloc(state.nCompKer, sizeof(double*));
+    for (int i=0; i<state.nCompKer; ++i) state.kernel_vec[i] = (double*)calloc(state.fwKernel*state.fwKernel, sizeof(double));
+    getKernelVec(&state);
 
-    int nS = PyList_Size(stamps_list);
-    stamp_struct* stamps = (stamp_struct*)calloc(nS, sizeof(stamp_struct));
-    if (allocateStamps(stamps, nS)) { free_hotpants_state(&state); PyErr_SetString(PyExc_MemoryError, "Failed to allocate stamps"); return NULL; }
+    state.nS = PyList_Size(stamps_list);
+    stamp_struct* stamps = (stamp_struct*)calloc(state.nS, sizeof(stamp_struct));
+    if (allocateStamps(&state, stamps, state.nS)) { free_hotpants_state(&state); PyErr_SetString(PyExc_MemoryError, "Failed to allocate stamps"); return NULL; }
 
-    for(int i = 0; i < nS; ++i) {
+    for(int i = 0; i < state.nS; ++i) {
         PyObject* stamp_dict = PyList_GetItem(stamps_list, i);
         stamps[i].xss[0] = (int)PyFloat_AsDouble(PyDict_GetItemString(stamp_dict, "x"));
         stamps[i].yss[0] = (int)PyFloat_AsDouble(PyDict_GetItemString(stamp_dict, "y"));
         stamps[i].nss = 1; stamps[i].sscnt = 0;
-        fillStamp(&stamps[i], (float*)PyArray_DATA(conv_arr), (float*)PyArray_DATA(ref_arr));
+        fillStamp(&state, &stamps[i], (float*)PyArray_DATA(conv_arr), (float*)PyArray_DATA(ref_arr));
     }
     
     double *kernel_sol = (double*)calloc(state.nCompTotal+1, sizeof(double));
-    temp = (float*)calloc(state.fwKSStamp*state.fwKSStamp, sizeof(float));
-    indx = (int*)calloc(state.nCompTotal+1, sizeof(int));
-    check_mat = (double**)calloc(state.nC+1, sizeof(double*)); for (int i=0; i<=state.nC; i++) check_mat[i] = (double*)calloc(state.nC+1, sizeof(double));
-    check_vec = (double*)calloc(state.nC+1, sizeof(double));
-    kernel_coeffs = (double*)calloc(state.nCompKer, sizeof(double));
-    kernel = (double*)calloc(state.fwKernel*state.fwKernel, sizeof(double));
+    state.temp = (float*)calloc(state.fwKSStamp*state.fwKSStamp, sizeof(float));
+    state.indx = (int*)calloc(state.nCompTotal+1, sizeof(int));
+    state.check_mat = (double**)calloc(state.nC+1, sizeof(double*)); for (int i=0; i<=state.nC; i++) state.check_mat[i] = (double*)calloc(state.nC+1, sizeof(double));
+    state.check_vec = (double*)calloc(state.nC+1, sizeof(double));
+    state.kernel_coeffs = (double*)calloc(state.nCompKer, sizeof(double));
+    state.kernel = (double*)calloc(state.fwKernel*state.fwKernel, sizeof(double));
 
     double meansig_substamps, scatter_substamps;
     int n_skipped_substamps;
-    char check_needed = check_again(stamps, kernel_sol, (float*)PyArray_DATA(conv_arr), (float*)PyArray_DATA(ref_arr), (float*)PyArray_DATA(noise_arr), &meansig_substamps, &scatter_substamps, &n_skipped_substamps);
+    char check_needed = check_again(&state, stamps, kernel_sol, (float*)PyArray_DATA(conv_arr), (float*)PyArray_DATA(ref_arr), (float*)PyArray_DATA(noise_arr), &meansig_substamps, &scatter_substamps, &n_skipped_substamps);
     
     PyObject* new_stamps_list = PyList_New(0);
-    for(int i = 0; i < nS; i++) {
+    for(int i = 0; i < state.nS; i++) {
         if(stamps[i].sscnt < stamps[i].nss) {
             PyObject* stamp_dict = PyDict_New();
             PyDict_SetItemString(stamp_dict, "x", PyFloat_FromDouble(stamps[i].xss[stamps[i].sscnt]));
@@ -331,8 +261,8 @@ static PyObject *py_check_and_refit_stamps(PyObject *self, PyObject *args) {
         }
     }
     
-    freeStampMem(stamps, nS); free(stamps); free(kernel_sol);
-    free_hotpants_state(&state); unset_globals();
+    freeStampMem(&state, stamps, state.nS); free(stamps); free(kernel_sol);
+    free_hotpants_state(&state);
     return Py_BuildValue("Oii", new_stamps_list, n_skipped_substamps, check_needed);
 }
 
@@ -340,39 +270,40 @@ static PyObject *py_get_global_solution(PyObject *self, PyObject *args) {
     PyObject *best_fits_list;
     PyObject *config_dict_obj;
     if (!PyArg_ParseTuple(args, "O!O!", &PyList_Type, &best_fits_list, &PyDict_Type, &config_dict_obj)) { return NULL; }
-    hotpants_config_t config; parse_config_dict(config_dict_obj, &config);
-    hotpants_state_t state; init_hotpants_state(&state, 1, 1, &config); set_globals_from_state(&state);
+    hotpants_config_t config; 
+    if(parse_config_dict(config_dict_obj, &config) < 0) return NULL;
+    hotpants_state_t state; init_hotpants_state(&state, 1, 1, &config);
     
     int n_stamps = PyList_Size(best_fits_list);
     stamp_struct* stamps = (stamp_struct*)calloc(n_stamps, sizeof(stamp_struct));
-    if (allocateStamps(stamps, n_stamps)) { free_hotpants_state(&state); PyErr_SetString(PyExc_MemoryError, "Failed to allocate stamps"); return NULL; }
+    if (allocateStamps(&state, stamps, n_stamps)) { free_hotpants_state(&state); PyErr_SetString(PyExc_MemoryError, "Failed to allocate stamps"); return NULL; }
 
     double *kernel_sol = (double*)calloc(state.nCompTotal+1, sizeof(double));
     if (!kernel_sol) { free_hotpants_state(&state); PyErr_SetString(PyExc_MemoryError, "Failed to allocate kernel solution"); return NULL; }
 
     double** matrix = (double**)calloc(state.nCompTotal + 2, sizeof(double*));
     for (int i=0; i<=state.nCompTotal + 1; ++i) matrix[i] = (double*)calloc(state.nCompTotal + 2, sizeof(double));
-    wxy = (double**)calloc(n_stamps, sizeof(double*));
-    for (int i=0; i<n_stamps; ++i) wxy[i] = (double*)calloc(state.nComp, sizeof(double));
-    indx = (int*)calloc(state.nCompTotal+2, sizeof(int));
+    state.wxy = (double**)calloc(n_stamps, sizeof(double*));
+    for (int i=0; i<n_stamps; ++i) state.wxy[i] = (double*)calloc(state.nComp, sizeof(double));
+    state.indx = (int*)calloc(state.nCompTotal+2, sizeof(int));
     
     // NOTE: The Python code must ensure that stamps are filled before this call.
-    build_matrix(stamps, n_stamps, matrix);
-    build_scprod(stamps, n_stamps, (float*)NULL, kernel_sol);
+    build_matrix(&state, stamps, n_stamps, matrix);
+    build_scprod(&state, stamps, n_stamps, (float*)NULL, kernel_sol);
     
     double d;
-    ludcmp(matrix, state.nCompTotal+1, indx, &d);
-    lubksb(matrix, state.nCompTotal+1, indx, kernel_sol);
+    ludcmp(matrix, state.nCompTotal+1, state.indx, &d);
+    lubksb(matrix, state.nCompTotal+1, state.indx, kernel_sol);
 
     npy_intp dims[] = {state.nCompTotal + 1};
     PyObject* global_coeffs_array = PyArray_SimpleNewFromData(1, dims, NPY_DOUBLE, kernel_sol); Py_INCREF(global_coeffs_array);
     
-    freeStampMem(stamps, n_stamps); free(stamps); free(kernel_sol);
+    freeStampMem(&state, stamps, n_stamps); free(stamps); free(kernel_sol);
     for(int i=0; i<=state.nCompTotal+1; ++i) free(matrix[i]); free(matrix);
-    for(int i=0; i<n_stamps; ++i) free(wxy[i]); free(wxy);
-    free(indx);
+    for(int i=0; i<n_stamps; ++i) free(state.wxy[i]); free(state.wxy);
+    free(state.indx);
     
-    free_hotpants_state(&state); unset_globals();
+    free_hotpants_state(&state);
     return global_coeffs_array;
 }
 
@@ -381,25 +312,26 @@ static PyObject *py_apply_kernel(PyObject *self, PyObject *args) {
     PyObject *config_dict_obj;
     if (!PyArg_ParseTuple(args, "O!O!O!", &PyArray_Type, &image_arr, &PyArray_Type, &kernel_solution_arr, &PyDict_Type, &config_dict_obj)) { return NULL; }
     int ny = (int)PyArray_DIM(image_arr, 0); int nx = (int)PyArray_DIM(image_arr, 1);
-    hotpants_config_t config; parse_config_dict(config_dict_obj, &config);
-    hotpants_state_t state; init_hotpants_state(&state, nx, ny, &config); set_globals_from_state(&state);
+    hotpants_config_t config; 
+    if(parse_config_dict(config_dict_obj, &config) < 0) return NULL;
+    hotpants_state_t state; init_hotpants_state(&state, nx, ny, &config);
     
     state.mRData = (int*)calloc(nx*ny, sizeof(int)); if (!state.mRData) { free_hotpants_state(&state); PyErr_SetString(PyExc_MemoryError, "Failed to allocate mask"); return NULL; }
-    kernel_vec = (double**)calloc(state.nCompKer, sizeof(double*));
-    for (int i=0; i<state.nCompKer; ++i) kernel_vec[i] = (double*)calloc(state.fwKernel*state.fwKernel, sizeof(double));
-    getKernelVec();
-    kernel = (double*)calloc(state.fwKernel*state.fwKernel, sizeof(double)); kernel_coeffs = (double*)calloc(state.nCompKer, sizeof(double));
+    state.kernel_vec = (double**)calloc(state.nCompKer, sizeof(double*));
+    for (int i=0; i<state.nCompKer; ++i) state.kernel_vec[i] = (double*)calloc(state.fwKernel*state.fwKernel, sizeof(double));
+    getKernelVec(&state);
+    state.kernel = (double*)calloc(state.fwKernel*state.fwKernel, sizeof(double)); state.kernel_coeffs = (double*)calloc(state.nCompKer, sizeof(double));
     double* kernel_sol = (double*)PyArray_DATA(kernel_solution_arr);
     float* conv_image = (float*)calloc(nx * ny, sizeof(float)); float* variance_image = (float*)calloc(nx*ny, sizeof(float)); 
     
-    spatial_convolve((float*)PyArray_DATA(image_arr), &variance_image, nx, ny, kernel_sol, conv_image, state.mRData);
+    spatial_convolve(&state, (float*)PyArray_DATA(image_arr), &variance_image, nx, ny, kernel_sol, conv_image, state.mRData);
     
     npy_intp dims[] = {ny, nx};
     PyObject* conv_arr = PyArray_SimpleNewFromData(2, dims, NPY_FLOAT32, conv_image); Py_INCREF(conv_arr);
     PyObject* mask_arr = PyArray_SimpleNewFromData(2, dims, NPY_INT32, state.mRData); Py_INCREF(mask_arr);
 
-    for(int i=0; i<state.nCompKer; ++i) free(kernel_vec[i]); free(kernel_vec);
-    free(kernel); free(kernel_coeffs); free_hotpants_state(&state); unset_globals();
+    for(int i=0; i<state.nCompKer; ++i) free(state.kernel_vec[i]); free(state.kernel_vec);
+    free(state.kernel); free(state.kernel_coeffs); free_hotpants_state(&state);
     
     return Py_BuildValue("OO", conv_arr, mask_arr);
 }
@@ -409,17 +341,18 @@ static PyObject *py_get_background_image(PyObject *self, PyObject *args) {
     PyObject *config_dict_obj;
     if (!PyArg_ParseTuple(args, "O!O!O!", &PyArray_Type, &shape_arr, &PyArray_Type, &kernel_sol_arr, &PyDict_Type, &config_dict_obj)) { return NULL; }
     int ny = (int)PyArray_DIM(shape_arr, 0); int nx = (int)PyArray_DIM(shape_arr, 1);
-    hotpants_config_t config; parse_config_dict(config_dict_obj, &config);
-    hotpants_state_t state; init_hotpants_state(&state, nx, ny, &config); set_globals_from_state(&state);
+    hotpants_config_t config; 
+    if(parse_config_dict(config_dict_obj, &config) < 0) return NULL;
+    hotpants_state_t state; init_hotpants_state(&state, nx, ny, &config);
     
     double *kernel_sol = (double*)PyArray_DATA(kernel_sol_arr);
     float* bkg_image = (float*)calloc(nx*ny, sizeof(float));
 
-    for(int j=0; j<ny; ++j) { for(int i=0; i<nx; ++i) { bkg_image[i + nx*j] = get_background(i, j, kernel_sol); } }
+    for(int j=0; j<ny; ++j) { for(int i=0; i<nx; ++i) { bkg_image[i + nx*j] = get_background(&state, i, j, kernel_sol); } }
     npy_intp dims[] = {ny, nx};
     PyObject* bkg_arr = PyArray_SimpleNewFromData(2, dims, NPY_FLOAT32, bkg_image); Py_INCREF(bkg_arr);
 
-    free_hotpants_state(&state); unset_globals();
+    free_hotpants_state(&state);
     return bkg_arr;
 }
 
@@ -428,19 +361,21 @@ static PyObject *py_rescale_noise_ok(PyObject *self, PyObject *args) {
     PyObject *config_dict_obj;
     if (!PyArg_ParseTuple(args, "O!O!O!O!", &PyArray_Type, &diff_arr, &PyArray_Type, &noise_arr, &PyArray_Type, &mask_arr, &PyDict_Type, &config_dict_obj)) { return NULL; }
     int ny = (int)PyArray_DIM(diff_arr, 0); int nx = (int)PyArray_DIM(diff_arr, 1);
-    hotpants_config_t config; parse_config_dict(config_dict_obj, &config);
-    hotpants_state_t state; init_hotpants_state(&state, nx, ny, &config); set_globals_from_state(&state);
+    hotpants_config_t config; 
+    if(parse_config_dict(config_dict_obj, &config) < 0) return NULL;
+    hotpants_state_t state; init_hotpants_state(&state, nx, ny, &config);
+    state.mRData = (int*)PyArray_DATA(mask_arr);
 
     float *diff_data = (float*)PyArray_DATA(diff_arr); float *noise_data = (float*)PyArray_DATA(noise_arr); int *mask_data = (int*)PyArray_DATA(mask_arr);
     double sdm, nmeanm;
-    getStampStats3(diff_data, 0, 0, nx, ny, NULL, &sdm, NULL, NULL, NULL, NULL, NULL, 0xff, FLAG_OUTPUT_ISBAD, 5);
-    getStampStats3(noise_data, 0, 0, nx, ny, NULL, &nmeanm, NULL, NULL, NULL, NULL, NULL, 0xff, FLAG_OUTPUT_ISBAD, 5);
+    getStampStats3(&state, diff_data, 0, 0, nx, ny, NULL, &sdm, NULL, NULL, NULL, NULL, NULL, 0xff, FLAG_OUTPUT_ISBAD, 5);
+    getStampStats3(&state, noise_data, 0, 0, nx, ny, NULL, &nmeanm, NULL, NULL, NULL, NULL, NULL, 0xff, FLAG_OUTPUT_ISBAD, 5);
     double diff_rat = sdm / nmeanm;
     if (diff_rat > 1) { for(int i=0; i<nx*ny; i++) { if((mask_data[i] & 0xff) && (!(mask_data[i] & FLAG_OUTPUT_ISBAD))) { noise_data[i] *= diff_rat; } } }
     npy_intp dims[] = {ny, nx};
     PyObject* new_noise_arr = PyArray_SimpleNewFromData(2, dims, NPY_FLOAT32, noise_data); Py_INCREF(new_noise_arr);
     
-    free_hotpants_state(&state); unset_globals();
+    free_hotpants_state(&state);
     return new_noise_arr;
 }
 
@@ -449,8 +384,9 @@ static PyObject *py_calculate_final_stats(PyObject *self, PyObject *args) {
     PyObject *config_dict_obj;
     if (!PyArg_ParseTuple(args, "O!O!O!O!", &PyArray_Type, &diff_arr, &PyArray_Type, &noise_arr, &PyArray_Type, &mask_arr, &PyDict_Type, &config_dict_obj)) { return NULL; }
     int ny = (int)PyArray_DIM(diff_arr, 0); int nx = (int)PyArray_DIM(diff_arr, 1);
-    hotpants_config_t config; parse_config_dict(config_dict_obj, &config);
-    hotpants_state_t state; init_hotpants_state(&state, nx, ny, &config); set_globals_from_state(&state);
+    hotpants_config_t config;
+    if(parse_config_dict(config_dict_obj, &config) < 0) return NULL;
+    hotpants_state_t state; init_hotpants_state(&state, nx, ny, &config);
     state.mRData = (int*)PyArray_DATA(mask_arr);
     
     float *diff_data = (float*)PyArray_DATA(diff_arr); float *noise_data = (float*)PyArray_DATA(noise_arr);
@@ -458,15 +394,15 @@ static PyObject *py_calculate_final_stats(PyObject *self, PyObject *args) {
     double nsum, nmean, nmedian, nmode, nsd, nfwhm, nlfwhm;
     double x2norm; int nx2norm;
     
-    getStampStats3(diff_data, 0, 0, nx, ny, &sum, &mean, &median, &mode, &sd, &fwhm, &lfwhm, 0x0, 0xffff, 5);
-    getStampStats3(noise_data, 0, 0, nx, ny, &nsum, &nmean, &nmedian, &nmode, &nsd, &nfwhm, &nlfwhm, 0x0, 0xffff, 5);
-    getNoiseStats3(diff_data, noise_data, &x2norm, &nx2norm, 0x0, 0xffff);
+    getStampStats3(&state, diff_data, 0, 0, nx, ny, &sum, &mean, &median, &mode, &sd, &fwhm, &lfwhm, 0x0, 0xffff, 5);
+    getStampStats3(&state, noise_data, 0, 0, nx, ny, &nsum, &nmean, &nmedian, &nmode, &nsd, &nfwhm, &nlfwhm, 0x0, 0xffff, 5);
+    getNoiseStats3(&state, diff_data, noise_data, &x2norm, &nx2norm, 0x0, 0xffff);
     
     PyObject* stats_dict = PyDict_New();
     PyDict_SetItemString(stats_dict, "diff_mean", PyFloat_FromDouble(mean)); PyDict_SetItemString(stats_dict, "diff_std", PyFloat_FromDouble(sd));
     PyDict_SetItemString(stats_dict, "noise_mean", PyFloat_FromDouble(nmean)); PyDict_SetItemString(stats_dict, "x2norm", PyFloat_FromDouble(x2norm));
     PyDict_SetItemString(stats_dict, "nx2norm", PyLong_FromLong(nx2norm));
-    free_hotpants_state(&state); unset_globals();
+    free_hotpants_state(&state);
     return stats_dict;
 }
 
@@ -474,11 +410,13 @@ static PyObject *py_calculate_final_stats(PyObject *self, PyObject *args) {
 static int parse_config_dict(PyObject *config_dict, hotpants_config_t *config) {
     if (!PyDict_Check(config_dict)) { PyErr_SetString(PyExc_TypeError, "Configuration must be a dictionary"); return -1; }
     config->tuthresh = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "tuthresh"));
-    config->tuktresh = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "tuktresh")); if (PyDict_GetItemString(config_dict, "tuktresh") == Py_None) config->tuktresh = config->tuthresh;
+    PyObject *tuktresh_obj = PyDict_GetItemString(config_dict, "tuktresh");
+    config->tuktresh = (tuktresh_obj == Py_None) ? config->tuthresh : PyFloat_AsDouble(tuktresh_obj);
     config->tlthresh = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "tlthresh")); config->tgain = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "tgain"));
     config->trdnoise = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "trdnoise")); config->tpedestal = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "tpedestal"));
     config->iuthresh = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "iuthresh"));
-    config->iuktresh = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "iuktresh")); if (PyDict_GetItemString(config_dict, "iuktresh") == Py_None) config->iuktresh = config->iuthresh;
+    PyObject *iuktresh_obj = PyDict_GetItemString(config_dict, "iuktresh");
+    config->iuktresh = (iuktresh_obj == Py_None) ? config->iuthresh : PyFloat_AsDouble(iuktresh_obj);
     config->ilthresh = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "ilthresh")); config->igain = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "igain"));
     config->irdnoise = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "irdnoise")); config->ipedestal = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "ipedestal"));
     config->rkernel = PyLong_AsLong(PyDict_GetItemString(config_dict, "rkernel")); config->ko = PyLong_AsLong(PyDict_GetItemString(config_dict, "ko"));
@@ -495,6 +433,8 @@ static int parse_config_dict(PyObject *config_dict, hotpants_config_t *config) {
     config->rescale_ok = PyLong_AsLong(PyDict_GetItemString(config_dict, "rescale_ok"));
     config->conv_var = PyLong_AsLong(PyDict_GetItemString(config_dict, "conv_var"));
     config->use_pca = PyLong_AsLong(PyDict_GetItemString(config_dict, "use_pca"));
+    config->nregx = PyLong_AsLong(PyDict_GetItemString(config_dict, "nregx")); config->nregy = PyLong_AsLong(PyDict_GetItemString(config_dict, "nregy"));
+    config->nstampx = PyLong_AsLong(PyDict_GetItemString(config_dict, "nstampx")); config->nstampy = PyLong_AsLong(PyDict_GetItemString(config_dict, "nstampy"));
     config->ngauss = PyLong_AsLong(PyDict_GetItemString(config_dict, "ngauss"));
     PyObject* deg_list = PyDict_GetItemString(config_dict, "deg_fixe");
     if(deg_list) { config->deg_fixe = (int*)malloc(config->ngauss * sizeof(int)); for(int i=0; i<config->ngauss; ++i) config->deg_fixe[i] = PyLong_AsLong(PyList_GetItem(deg_list, i)); }
@@ -504,6 +444,8 @@ static int parse_config_dict(PyObject *config_dict, hotpants_config_t *config) {
     config->ncomp_ker = PyLong_AsLong(PyDict_GetItemString(config_dict, "ncomp_ker")); config->ncomp = PyLong_AsLong(PyDict_GetItemString(config_dict, "ncomp"));
     config->n_bg_vectors = PyLong_AsLong(PyDict_GetItemString(config_dict, "n_bg_vectors"));
     config->n_comp_total = PyLong_AsLong(PyDict_GetItemString(config_dict, "n_comp_total"));
+    config->stat_sig = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "stat_sig"));
+    config->kf_spread_mask1 = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "kf_spread_mask1"));
     return 0;
 }
 static void init_hotpants_state(hotpants_state_t *state, int nx, int ny, const hotpants_config_t *config) {
@@ -521,7 +463,10 @@ static void init_hotpants_state(hotpants_state_t *state, int nx, int ny, const h
     strncpy(state->figMerit_str, config->fom, 2);
     state->fillVal = config->fillval; state->fillValNoise = config->fillval_noise; state->verbose = config->verbose;
     state->rescaleOK = config->rescale_ok; state->convolveVariance = config->conv_var; state->usePCA = config->use_pca;
-    state->ngauss = config->ngauss; state->deg_fixe = config->deg_fixe; state->sigma_gauss = config->sigma_gauss;
+    state->statSig = config->stat_sig; state->kfSpreadMask1 = config->kf_spread_mask1;
+    state->ngauss = config->ngauss;
+    state->deg_fixe = (int*)malloc(state->ngauss * sizeof(int)); memcpy(state->deg_fixe, config->deg_fixe, state->ngauss * sizeof(int));
+    state->sigma_gauss = (float*)malloc(state->ngauss * sizeof(float)); memcpy(state->sigma_gauss, config->sigma_gauss, state->ngauss * sizeof(float));
     state->fwKernel = config->fwkernel; 
     
     // The following is a derived value in the C code
@@ -530,21 +475,22 @@ static void init_hotpants_state(hotpants_state_t *state, int nx, int ny, const h
     state->hwStamp = state->hwKernel;
     state->fwKSStamp = config->fwksstamp; state->nStamps = state->nStampX * state->nStampY; state->nCompKer = config->ncomp_ker;
     state->nComp = config->ncomp; state->nBGVectors = config->n_bg_vectors; state->nCompTotal = config->n_comp_total;
-    state->nC = state->nCompKer + 2;
+    state->nC = state->nCompKer + state->nBGVectors + 1;
     state->mRData = (int*)calloc(nx * ny, sizeof(int)); state->temp = (float*)calloc(nx*ny, sizeof(float)); state->temp2 = (float*)calloc(nx*ny, sizeof(float));
     state->indx = (int*)calloc(state->nCompTotal + 100, sizeof(int)); state->kernel = (double*)calloc(state->fwKernel*state->fwKernel, sizeof(double));
-    state->kernel_coeffs = (double*)calloc(state->nCompKer, sizeof(double)); state->kernel_vec = (double**)calloc(state->nCompKer, sizeof(double*));
+    state->kernel_coeffs = (double*)calloc(state->nCompKer, sizeof(double));
+    state->kernel_vec = (double**)calloc(state->nCompKer, sizeof(double*));
     state->filter_x = (double*)calloc(state->nCompKer*state->fwKernel, sizeof(double)); state->filter_y = (double*)calloc(state->nCompKer*state->fwKernel, sizeof(double));
     state->check_mat = (double**)calloc(state->nC, sizeof(double*)); for (int i=0; i<state->nC; ++i) state->check_mat[i] = (double*)calloc(state->nC, sizeof(double));
     state->check_vec = (double*)calloc(state->nC, sizeof(double)); state->check_stack = (double*)calloc(state->nStamps, sizeof(double));
     state->wxy = (double**)calloc(state->nStamps, sizeof(double*)); for (int i=0; i<state->nStamps; ++i) state->wxy[i] = (double*)calloc(state->nComp, sizeof(double));
     state->PCA = (float**)calloc(state->ngauss, sizeof(float*));
-    
+
     // Allocate the stamp arrays which are global in the original C code
     state->tStamps = (stamp_struct*)calloc(state->nStamps, sizeof(stamp_struct));
-    allocateStamps(state->tStamps, state->nStamps);
+    allocateStamps(state, state->tStamps, state->nStamps);
     state->iStamps = (stamp_struct*)calloc(state->nStamps, sizeof(stamp_struct));
-    allocateStamps(state->iStamps, state->nStamps);
+    allocateStamps(state, state->iStamps, state->nStamps);
 }
 static void free_hotpants_state(hotpants_state_t *state) {
     if (state->mRData) free(state->mRData); if (state->temp) free(state->temp); if (state->temp2) free(state->temp2);
@@ -555,36 +501,9 @@ static void free_hotpants_state(hotpants_state_t *state) {
     if (state->check_vec) free(state->check_vec); if (state->check_stack) free(state->check_stack);
     if (state->wxy) { for(int i=0; i<state->nStamps; ++i) if(state->wxy[i]) free(state->wxy[i]); free(state->wxy); }
     if (state->PCA) { for(int i=0; i<state->ngauss; ++i) if(state->PCA[i]) free(state->PCA[i]); free(state->PCA); }
-    if (state->tStamps) { freeStampMem(state->tStamps, state->nStamps); free(state->tStamps); }
-    if (state->iStamps) { freeStampMem(state->iStamps, state->nStamps); free(state->iStamps); }
-}
-static void set_globals_from_state(hotpants_state_t *state) {
-    verbose = state->verbose; tUThresh = state->tUThresh; tLThresh = state->tLThresh; tUKThresh = state->tUKThresh;
-    tGain = state->tGain; tRdnoise = state->tRdnoise; tPedestal = state->tPedestal;
-    iUThresh = state->iUThresh; iLThresh = state->iLThresh; iUKThresh = state->iUKThresh;
-    iGain = state->iGain; iRdnoise = state->iRdnoise; iPedestal = state->iPedestal;
-    hwKernel = state->hwKernel; kerFitThresh = state->kerFitThresh; kerOrder = state->kerOrder; bgOrder = state->bgOrder;
-    nKSStamps = state->nKSStamps; hwKSStamp = state->hwKSStamp; kerFracMask = state->kerFracMask; kerSigReject = state->kerSigReject;
-    nRegX = state->nRegX; nRegY = state->nRegY; nStampX = state->nStampX; nStampY = state->nStampY;
-    forceConvolve = state->forceConvolve_str; photNormalize = state->photNormalize_str; figMerit = state->figMerit_str;
-    fillVal = state->fillVal; fillValNoise = state->fillValNoise; ngauss = state->ngauss;
-    deg_fixe = state->deg_fixe; sigma_gauss = state->sigma_gauss; rPixX = state->rPixX; rPixY = state->rPixY;
-    fwKernel = state->fwKernel; fwStamp = state->fwStamp; hwStamp = state->hwStamp; fwKSStamp = state->fwKSStamp;
-    nStamps = state->nStamps; nCompKer = state->nCompKer; nComp = state->nComp; nBGVectors = state->nBGVectors;
-    nCompTotal = state->nCompTotal; nC = state->nC; rescaleOK = state->rescaleOK;
-    convolveVariance = state->convolveVariance; usePCA = state->usePCA;
-    mRData = state->mRData; temp = state->temp; temp2 = state->temp2; indx = state->indx;
-    kernel = state->kernel; kernel_coeffs = state->kernel_coeffs; kernel_vec = state->kernel_vec;
-    filter_x = state->filter_x; filter_y = state->filter_y; check_mat = state->check_mat;
-    check_vec = state->check_vec; check_stack = state->check_stack; wxy = state->wxy;
-    tStamps = state->tStamps; iStamps = state->iStamps;
-}
-static void unset_globals() {
-    verbose = 0; rPixX=0; rPixY=0; fwKernel=0; nCompKer=0; nC=0; nStamps=0;
-    forceConvolve = NULL; photNormalize = NULL; figMerit = NULL; deg_fixe = NULL; sigma_gauss = NULL;
-    mRData = NULL; temp = NULL; temp2 = NULL; indx = NULL; kernel = NULL; kernel_coeffs = NULL;
-    kernel_vec = NULL; filter_x = NULL; filter_y = NULL; check_mat = NULL; check_vec = NULL;
-    check_stack = NULL; wxy = NULL; tStamps = NULL; iStamps = NULL;
+    if (state->tStamps) { freeStampMem(&state, state->tStamps, state->nStamps); free(state->tStamps); }
+    if (state->iStamps) { freeStampMem(&state, state->iStamps, state->nStamps); free(state->iStamps); }
+    if (state->deg_fixe) free(state->deg_fixe); if(state->sigma_gauss) free(state->sigma_gauss);
 }
 static PyMethodDef hotpants_ext_methods[] = {
     {"make_input_mask", py_make_input_mask, METH_VARARGS, "Creates a pixel mask based on input data and thresholds."},

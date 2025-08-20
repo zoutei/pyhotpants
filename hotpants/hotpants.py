@@ -67,6 +67,8 @@ class HotpantsConfig:
         self.rss = kwargs.get("rss", 15)
         self.ks = kwargs.get("ks", 2.0)
         self.kfm = kwargs.get("kfm", 0.99)
+        self.stat_sig = kwargs.get("stat_sig", 3.0)
+        self.kf_spread_mask1 = kwargs.get("kf_spread_mask1", 1.0)
 
         # General and miscellaneous
         self.verbose = kwargs.get("verbose", 1)

@@ -23,63 +23,77 @@ typedef struct
    double    diff;        /* (norm - mean_ksum) * sqrt(sum) */
 } stamp_struct;
 
-/* GLOBAL VARS POSSIBLY SET ON COMMAND LINE */
-char      *template, *image, *outim;
+#define MAXDIM        4
+#define SCRLEN        256
+#define MAXVAL        1e10
+#define ZEROVAL       1e-10
 
-float     tUThresh, tUKThresh, tLThresh, tGain, tRdnoise, iUThresh, iUKThresh, iLThresh, iGain, iRdnoise;
-char      *tNoiseIm, *iNoiseIm, *tMaskIm, *iMaskIm, *kernelImIn, *kernelImOut, *outMask;
-float     tPedestal, iPedestal;
-int       hwKernel;
-float     kerFitThresh, scaleFitThresh, minFracGoodStamps;
-float     kfSpreadMask1, kfSpreadMask2;
-int       gdXmin, gdXmax, gdYmin, gdYmax;
-int       nRegX, nRegY;
-char      *regFile;
-char      *regKeyWord;
-int       numRegKeyWord;
-int       nStampY, nStampX, useFullSS;
-int       nKSStamps, hwKSStamp;
-char      *sstampFile;
-int       findSSC;
-int       kerOrder, bgOrder;
-float     statSig, kerSigReject, kerFracMask;
-char      *forceConvolve, *photNormalize, *figMerit;
-int       sameConv, rescaleOK;
-float     fillVal, fillValNoise;
-char      *effFile, *noiseImage, *sigmaImage, *convImage;
-int       doSum, inclNoiseImage, inclSigmaImage, inclConvImage, noClobber;
-int       doKerInfo, outShort, outNShort;
-float     outBzero, outBscale, outNiBzero, outNiBscale;
-int       convolveVariance;
-int       usePCA, fwKernelPCA;
-float     **PCA;
+/* FLAGS */
+#define FLAG_BAD_PIXVAL         0x01   /* 1 */
+#define FLAG_SAT_PIXEL          0x02   /* 2 */
+#define FLAG_LOW_PIXEL          0x04   /* 4 */
+#define FLAG_ISNAN              0x08   /* 8 */
+#define FLAG_BAD_CONV           0x10   /* 16  */
+#define FLAG_INPUT_MASK         0x20   /* 32  */
+#define FLAG_OK_CONV            0x40   /* 64  */
+#define FLAG_INPUT_ISBAD        0x80   /* 128 */
+#define FLAG_T_BAD              0x100  /* 256  */
+#define FLAG_T_SKIP             0x200  /* 512  */
+#define FLAG_I_BAD              0x400  /* 1024 */
+#define FLAG_I_SKIP             0x800  /* 2048 */
+#define FLAG_OUTPUT_ISBAD       0x8000 /* 32768 */
 
-/* GLOBAL VARS NOT SET ON COMMAND LINE */
-int       ngauss, *deg_fixe;
-float     *sigma_gauss;
+/* A single struct to hold all state, replacing global variables */
+typedef struct {
+    int nx, ny;
+    float tUThresh, tLThresh, tUKThresh, tGain, tRdnoise, tPedestal;
+    float iUThresh, iLThresh, iUKThresh, iGain, iRdnoise, iPedestal;
+    int hwKernel, kerOrder, bgOrder;
+    float kerFitThresh, kerSigReject, kerFracMask;
+    int nKSStamps, hwKSStamp;
+    int nRegX, nRegY, nStampX, nStampY;
+    char forceConvolve_str[2], photNormalize_str[2], figMerit_str[2];
+    float fillVal, fillValNoise;
+    int verbose;
+    int ngauss;
+    int *deg_fixe;
+    float *sigma_gauss;
+    int rPixX, rPixY;
+    int fwKernel, fwStamp, hwStamp, fwKSStamp;
+    int nStamps, nS, nCompKer, nComp, nBGVectors, nCompTotal;
+    int nC;
+    int cmpFile;
+    int rescaleOK;
+    int convolveVariance;
+    int usePCA;
+    float **PCA;
+    
+    // Pointers to temporary C arrays that need to be managed
+    int *mRData;
+    float *temp, *temp2;
+    double *check_stack, *filter_x, *filter_y, **kernel_vec;
+    double **wxy, *kernel_coeffs, *kernel, **check_mat, *check_vec;
+    stamp_struct *tStamps;
+    stamp_struct *iStamps;
+    int *indx;
 
-int       rPixX, rPixY;
-int       nStamps, nS, nCompKer, nC;
+    char *template, *image, *outim;
+    char *tNoiseIm, *iNoiseIm, *tMaskIm, *iMaskIm, *kernelImIn, *kernelImOut, *outMask;
+    char *regFile;
+    char *regKeyWord;
+    int numRegKeyWord;
+    int useFullSS;
+    char *sstampFile;
+    int findSSC;
+    float statSig, kfSpreadMask1, kfSpreadMask2;
+    int sameConv, doSum, inclNoiseImage, inclSigmaImage, inclConvImage, noClobber;
+    int doKerInfo, outShort, outNShort;
+    float outBzero, outBscale, outNiBzero, outNiBscale;
+    int kcStep;
+    int dummy;
+    int savexyflag;
+    char xyfilename[1000];
+    float *xcmp,*ycmp;
+    int Ncmp;
+} hotpants_state_t;
 
-int       nComp, nCompBG, nBGVectors, nCompTotal;
-
-int       fwKernel, fwStamp, hwStamp, fwKSStamp, kcStep, *indx;
-int       cmpFile;
-float     *temp, *temp2;
-double    *check_stack,*filter_x,*filter_y,**kernel_vec;
-double    **wxy,*kernel_coeffs,*kernel,**check_mat,*check_vec;
-char      version[32];
-
-/* REGION SIZED */
-int       *mRData;   /* bad input data mask */
-
-/* armin */
-/* a dummy varialbe to do some testing */
-int        dummy;
-/* verbose for debugging */
-int        verbose;
-/* cmp file stuff */
-char       xyfilename[1000];
-int        savexyflag;
-float      *xcmp,*ycmp;
-int        Ncmp;

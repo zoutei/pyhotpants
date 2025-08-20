@@ -5,7 +5,6 @@
 #include<stdlib.h>
 #include<ctype.h>
 
-#include "defaults.h"
 #include "globals.h"
 #include "functions.h"
 
@@ -22,7 +21,7 @@ code.
 */
 
 /* armin */ 
-void loadxyfile(char *filename, int cmpfileflag){      
+void loadxyfile(hotpants_state_t *state, char *filename, int cmpfileflag){      
     FILE *xyfile;
     int Nalloc,c;
     char line[SCRLEN];
@@ -36,49 +35,49 @@ void loadxyfile(char *filename, int cmpfileflag){
         }
     }
     Nalloc=100;
-    if ( !(xcmp = (float *)malloc(Nalloc*sizeof(float))) ||
-         !(ycmp = (float *)malloc(Nalloc*sizeof(float))) )
+    if ( !(state->xcmp = (float *)malloc(Nalloc*sizeof(float))) ||
+         !(state->ycmp = (float *)malloc(Nalloc*sizeof(float))) )
         exit(1);
-    Ncmp=0;
+    state->Ncmp=0;
     while(fgets(line, SCRLEN, xyfile) != NULL) {
         /* reallocate if necessary */
-        if (Ncmp==Nalloc){
+        if (state->Ncmp==Nalloc){
             Nalloc+=100;
-            xcmp  = (float *)realloc(xcmp, Nalloc *sizeof(float));
-            ycmp  = (float *)realloc(ycmp, Nalloc *sizeof(float));
+            state->xcmp  = (float *)realloc(state->xcmp, Nalloc *sizeof(float));
+            state->ycmp  = (float *)realloc(state->ycmp, Nalloc *sizeof(float));
         }
         
         /* skip poorly formatted lines... */
         if (isalpha(line[0])) continue;
-        if (sscanf(line, "%f %f", &xcmp[Ncmp], &ycmp[Ncmp]) == 2) {
-            Ncmp++;
+        if (sscanf(line, "%f %f", &state->xcmp[state->Ncmp], &state->ycmp[state->Ncmp]) == 2) {
+            state->Ncmp++;
         }
     }
     fclose(xyfile);
     
     /* take care of 1-indexing, our arrays are 0-indexed */
-    for (c = 0; c < Ncmp; c++) {
-        xcmp[c] -= 1;
-        ycmp[c] -= 1;
+    for (c = 0; c < state->Ncmp; c++) {
+        state->xcmp[c] -= 1;
+        state->ycmp[c] -= 1;
     }
 }
 
 /*armin*/
-void savexy(stamp_struct *stamps, int nStamps, long xmin, long ymin, int regioncounter){
+void savexy(hotpants_state_t *state, stamp_struct *stamps, int nStamps, long xmin, long ymin, int regioncounter){
     int  sscnt,istamp;
     FILE *xyfileused,*xyfileall,*xyfileskipped;
     char xyfilenameall[1000];
     char xyfilenameskipped[1000];
     
-    sprintf(xyfilenameall,"%s.all",xyfilename);
-    sprintf(xyfilenameskipped,"%s.skipped",xyfilename);
+    sprintf(xyfilenameall,"%s.all",state->xyfilename);
+    sprintf(xyfilenameskipped,"%s.skipped",state->xyfilename);
     
     if (regioncounter==0) {
-        xyfileused = fopen(xyfilename, "w");
+        xyfileused = fopen(state->xyfilename, "w");
         xyfileall  = fopen(xyfilenameall, "w");
         xyfileskipped = fopen(xyfilenameskipped, "w");
     } else {
-        xyfileused = fopen(xyfilename, "a");
+        xyfileused = fopen(state->xyfilename, "a");
         xyfileall  = fopen(xyfilenameall, "a");
         xyfileskipped = fopen(xyfilenameskipped, "a");
     }
@@ -93,19 +92,19 @@ void savexy(stamp_struct *stamps, int nStamps, long xmin, long ymin, int regionc
             /*fprintf(xyfileall,        " %4ld %4ld\n", stamps[istamp].xss[sscnt] + xmin, stamps[istamp].yss[sscnt] + ymin);*/
             fprintf(xyfileall,        "image;box(%4ld,%4ld,%d,%d) # color=yellow\n",
                     stamps[istamp].xss[sscnt] + xmin + 1,
-                    stamps[istamp].yss[sscnt] + ymin + 1, fwKSStamp, fwKSStamp);    
+                    stamps[istamp].yss[sscnt] + ymin + 1, state->fwKSStamp, state->fwKSStamp);    
             
             if (sscnt == stamps[istamp].sscnt)
                 /*fprintf(xyfileused,    " %4ld %4ld\n", stamps[istamp].xss[sscnt] + xmin, stamps[istamp].yss[sscnt] + ymin);*/
                 fprintf(xyfileused,    "image;box(%4ld,%4ld,%d,%d) # color=green\n",
                         stamps[istamp].xss[sscnt] + xmin + 1,
-                        stamps[istamp].yss[sscnt] + ymin + 1, fwKSStamp, fwKSStamp);
+                        stamps[istamp].yss[sscnt] + ymin + 1, state->fwKSStamp, state->fwKSStamp);
             
             if (sscnt < stamps[istamp].sscnt)
                 /*fprintf(xyfileskipped, " %4ld %4ld\n", stamps[istamp].xss[sscnt] + xmin, stamps[istamp].yss[sscnt] + ymin);*/
                 fprintf(xyfileskipped, "image;box(%4ld,%4ld,%d,%d) # color=red\n",
                         stamps[istamp].xss[sscnt] + xmin + 1,
-                        stamps[istamp].yss[sscnt] + ymin + 1, fwKSStamp, fwKSStamp);    
+                        stamps[istamp].yss[sscnt] + ymin + 1, state->fwKSStamp, state->fwKSStamp);    
         }
     }
     
@@ -114,51 +113,51 @@ void savexy(stamp_struct *stamps, int nStamps, long xmin, long ymin, int regionc
     fclose(xyfileused);
 }
 
-int allocateStamps(stamp_struct *stamps, int nStamps) {                                                                     
+int allocateStamps(hotpants_state_t *state, stamp_struct *stamps, int nStamps) {                                                                     
     int i,j;
     int nbgVectors;
     
-    nbgVectors = ((bgOrder + 1) * (bgOrder + 2)) / 2;
+    nbgVectors = ((state->bgOrder + 1) * (state->bgOrder + 2)) / 2;
     
     if (stamps) {
         for (i = 0; i < nStamps; i++) {
             
             /* **************************** */
-            if(!(stamps[i].vectors = (double **)calloc((nCompKer+nbgVectors), sizeof(double *))))
+            if(!(stamps[i].vectors = (double **)calloc((state->nCompKer+nbgVectors), sizeof(double *))))
                 return 1;
             
-            for (j = 0; j < nCompKer + nbgVectors; j++) {
-                if(!(stamps[i].vectors[j] = (double *)calloc(fwKSStamp*fwKSStamp, sizeof(double))))
+            for (j = 0; j < state->nCompKer + nbgVectors; j++) {
+                if(!(stamps[i].vectors[j] = (double *)calloc(state->fwKSStamp*state->fwKSStamp, sizeof(double))))
                     return 1;
             }
             
             /* **************************** */
             
-            if (!(stamps[i].krefArea      = (double *)calloc(fwKSStamp*fwKSStamp, sizeof(double))))
+            if (!(stamps[i].krefArea      = (double *)calloc(state->fwKSStamp*state->fwKSStamp, sizeof(double))))
                 return 1;
             
             /* **************************** */
             
-            if (!(stamps[i].mat    = (double **)calloc(nC, sizeof(double *))))
+            if (!(stamps[i].mat    = (double **)calloc(state->nC, sizeof(double *))))
                 return 1;
             
-            for (j = 0; j < nC; j++)
-                if ( !(stamps[i].mat[j] = (double *)calloc(nC, sizeof(double))) )
+            for (j = 0; j < state->nC; j++)
+                if ( !(stamps[i].mat[j] = (double *)calloc(state->nC, sizeof(double))) )
                     return 1;
             
             /* **************************** */
             
-            if (!(stamps[i].xss = (int *)calloc(nKSStamps, sizeof(int))))
+            if (!(stamps[i].xss = (int *)calloc(state->nKSStamps, sizeof(int))))
                 return 1;
             
             /* **************************** */
             
-            if (!(stamps[i].yss = (int *)calloc(nKSStamps, sizeof(int))))
+            if (!(stamps[i].yss = (int *)calloc(state->nKSStamps, sizeof(int))))
                 return 1;
             
             /* **************************** */
             
-            if (!(stamps[i].scprod = (double *)calloc(nC, sizeof(double))))
+            if (!(stamps[i].scprod = (double *)calloc(state->nC, sizeof(double))))
                 return 1;
             
             /* **************************** */
@@ -176,7 +175,7 @@ int allocateStamps(stamp_struct *stamps, int nStamps) {
 }
 
 
-void buildStamps(int sXMin, int sXMax, int sYMin, int sYMax, int *niS, int *ntS,
+void buildStamps(hotpants_state_t *state, int sXMin, int sXMax, int sYMin, int sYMax, int *niS, int *ntS,
                  int getCenters, int rXBMin, int rYBMin, stamp_struct *ciStamps, stamp_struct *ctStamps,
                  float *iRData, float *tRData, float hardX, float hardY) {
     
@@ -188,7 +187,7 @@ void buildStamps(int sXMin, int sXMax, int sYMin, int sYMax, int *niS, int *ntS,
     float *refArea=NULL;
     double check;
     
-    if (verbose >= 1)
+    if (state->verbose >= 1)
         fprintf(stderr, "    Stamp in region : %d:%d,%d:%d\n",
                 sXMin, sXMax, sYMin, sYMax);
     
@@ -196,21 +195,21 @@ void buildStamps(int sXMin, int sXMax, int sYMin, int sYMax, int *niS, int *ntS,
     sPixX  = sXMax - sXMin + 1;
     sPixY  = sYMax - sYMin + 1;
     
-    if (!(strncmp(forceConvolve, "i", 1)==0)) {
+    if (!(strncmp(state->forceConvolve_str, "i", 1)==0)) {
         
         if (ctStamps[*ntS].nss == 0) {
             refArea = (float *)calloc(sPixX*sPixY, sizeof(float));
             
             /* temp : store the whole stamp in refArea */
-            cutStamp(tRData, refArea, rPixX, sXMin-rXBMin, sYMin-rYBMin,
+            cutStamp(tRData, refArea, state->rPixX, sXMin-rXBMin, sYMin-rYBMin,
                      sXMax-rXBMin, sYMax-rYBMin, &ctStamps[*ntS]);
             
-            if ( !( getStampStats3(refArea, ctStamps[*ntS].x0, ctStamps[*ntS].y0, sPixX, sPixY,
+            if ( !( getStampStats3(state, refArea, ctStamps[*ntS].x0, ctStamps[*ntS].y0, sPixX, sPixY,
                                    &ctStamps[*ntS].sum, &ctStamps[*ntS].mean, &ctStamps[*ntS].median,
                                    &ctStamps[*ntS].mode, &ctStamps[*ntS].sd, &ctStamps[*ntS].fwhm,
                                    &ctStamps[*ntS].lfwhm, 0x0, 0xffff, 3))) {
                 /* pointless */
-                if (verbose >= 1)
+                if (state->verbose >= 1)
                     fprintf(stderr, "    Tmpl  xs : %4i ys : %4i  (sky,dsky = %.1f,%.1f)\n",
                             ctStamps[*ntS].x, ctStamps[*ntS].y, ctStamps[*ntS].mode, ctStamps[*ntS].fwhm);
             }
@@ -218,23 +217,23 @@ void buildStamps(int sXMin, int sXMax, int sYMin, int sYMax, int *niS, int *ntS,
         }
     }
     
-    if (!(strncmp(forceConvolve, "t", 1)==0)) {
+    if (!(strncmp(state->forceConvolve_str, "t", 1)==0)) {
         
         if (ciStamps[*niS].nss == 0) {
             refArea = (float *)calloc(sPixX*sPixY, sizeof(float));
             
             /* store the whole of the stamp in .refArea */
-            cutStamp(iRData, refArea, rPixX, sXMin-rXBMin, sYMin-rYBMin,
+            cutStamp(iRData, refArea, state->rPixX, sXMin-rXBMin, sYMin-rYBMin,
                      sXMax-rXBMin, sYMax-rYBMin, &ciStamps[*niS]);
             
-            if ( !( getStampStats3(refArea, ciStamps[*niS].x0, ciStamps[*niS].y0, sPixX, sPixY,
+            if ( !( getStampStats3(state, refArea, ciStamps[*niS].x0, ciStamps[*niS].y0, sPixX, sPixY,
                                    &ciStamps[*niS].sum, &ciStamps[*niS].mean, &ciStamps[*niS].median,
                                    &ciStamps[*niS].mode, &ciStamps[*niS].sd, &ciStamps[*niS].fwhm,
                                    &ciStamps[*niS].lfwhm, 0x0, 0xffff, 3))) {
                 
                 /* pointless */
                 /* buildSigMask(&ciStamps[*niS], sPixX, sPixY, misRData); */
-                if (verbose >= 1)
+                if (state->verbose >= 1)
                     fprintf(stderr, "    Image xs : %4i ys : %4i  (sky,dsky = %.1f,%.1f)\n",
                             ciStamps[*niS].x, ciStamps[*niS].y, ciStamps[*niS].mode, ciStamps[*niS].fwhm);
             }
@@ -242,107 +241,107 @@ void buildStamps(int sXMin, int sXMax, int sYMin, int sYMax, int *niS, int *ntS,
         }
     }
     
-    if (!(strncmp(forceConvolve, "i", 1)==0)) {
+    if (!(strncmp(state->forceConvolve_str, "i", 1)==0)) {
         nss = ctStamps[*ntS].nss;
         if (getCenters) {
             /* get potential centers for the kernel fit */
-            getPsfCenters(&ctStamps[*ntS], tRData, sPixX, sPixY, tUKThresh, bbitt1, bbitt2);
-            if (verbose >= 1)
+            getPsfCenters(state, &ctStamps[*ntS], tRData, sPixX, sPixY, state->tUKThresh, bbitt1, bbitt2);
+            if (state->verbose >= 1)
                 fprintf(stderr, "    Tmpl     : scnt = %2i nss = %2i\n",
                         ctStamps[*ntS].sscnt, ctStamps[*ntS].nss);
             
         } else {
             /* don't increment ntS inside subroutine, BUT MAKE SURE YOU DO IT OUTSIDE! */
-            if (nss < nKSStamps) {
+            if (nss < state->nKSStamps) {
                 
                 if (hardX)
                     xmax = (int)(hardX);
                 else
-                    xmax = sXMin + (int)(fwStamp/2);
+                    xmax = sXMin + (int)(state->fwStamp/2);
                 
                 if (hardY)
                     ymax = (int)(hardY);
                 else
-                    ymax = sYMin + (int)(fwStamp/2);
+                    ymax = sYMin + (int)(state->fwStamp/2);
                 
-                check = checkPsfCenter(tRData, xmax-ctStamps[*ntS].x0, ymax-ctStamps[*ntS].y0, sPixX, sPixY,
-                                       ctStamps[*ntS].x0, ctStamps[*ntS].y0, tUKThresh,
+                check = checkPsfCenter(state, tRData, xmax-ctStamps[*ntS].x0, ymax-ctStamps[*ntS].y0, sPixX, sPixY,
+                                       ctStamps[*ntS].x0, ctStamps[*ntS].y0, state->tUKThresh,
                                        ctStamps[*ntS].mode, 1. / ctStamps[*ntS].fwhm,
                                        0, 0, bbitt1 | bbitt2 | 0xbf, bbitt1);
                 
                 /* its ok? */
                 if (check != 0.) {
                     /* globally mask out the region around this guy */
-                    for (l = ymax-hwKSStamp; l <= ymax+hwKSStamp; l++) {
+                    for (l = ymax-state->hwKSStamp; l <= ymax+state->hwKSStamp; l++) {
                         /*yr2 = l + ctStamps[*ntS].y0;*/
                         
-                        for (k = xmax-hwKSStamp; k <= xmax+hwKSStamp; k++) {
+                        for (k = xmax-state->hwKSStamp; k <= xmax+state->hwKSStamp; k++) {
                             /*xr2 = k + ctStamps[*ntS].x0;*/
-                            nr2 = l+rPixX*k;
+                            nr2 = l+state->rPixX*k;
                             
                             /*if ((k > 0) && (k < sPixX) && (l > 0) && (l < sPixY))*/
-                            if (nr2 >= 0 && nr2 < rPixX*rPixY)
-                                mRData[nr2] |= bbitt2;
+                            if (nr2 >= 0 && nr2 < state->rPixX*state->rPixY)
+                                state->mRData[nr2] |= bbitt2;
                         }
                     }
                     
                     ctStamps[*ntS].xss[nss] = xmax;
                     ctStamps[*ntS].yss[nss] = ymax;	    
                     ctStamps[*ntS].nss += 1;
-                    if (verbose >= 2) fprintf(stderr,"     #%d @ %4d,%4d\n", nss, xmax, ymax);
+                    if (state->verbose >= 2) fprintf(stderr,"     #%d @ %4d,%4d\n", nss, xmax, ymax);
                 }
             }
         }
     }
     
-    if (!(strncmp(forceConvolve, "t", 1)==0)) {
+    if (!(strncmp(state->forceConvolve_str, "t", 1)==0)) {
         nss = ciStamps[*niS].nss;
         
         if (getCenters) {
             /* get potential centers for the kernel fit */
-            getPsfCenters(&ciStamps[*niS], iRData, sPixX, sPixY, iUKThresh, bbiti1, bbiti2);
-            if (verbose >= 1)
+            getPsfCenters(state, &ciStamps[*niS], iRData, sPixX, sPixY, state->iUKThresh, bbiti1, bbiti2);
+            if (state->verbose >= 1)
                 fprintf(stderr, "    Image    : scnt = %2i nss = %2i\n",
                         ciStamps[*niS].sscnt, ciStamps[*niS].nss);
         } else {
             /* don't increment niS inside subroutine, BUT MAKE SURE YOU DO IT OUTSIDE! */
-            if (nss < nKSStamps) {
+            if (nss < state->nKSStamps) {
                 if (hardX)
                     xmax = (int)(hardX);
                 else
-                    xmax = sXMin + (int)(fwStamp/2);
+                    xmax = sXMin + (int)(state->fwStamp/2);
                 
                 if (hardY)
                     ymax = (int)(hardY);
                 else
-                    ymax = sYMin + (int)(fwStamp/2);
+                    ymax = sYMin + (int)(state->fwStamp/2);
                 
-                check = checkPsfCenter(iRData, xmax-ciStamps[*niS].x0, ymax-ciStamps[*niS].y0, sPixX, sPixY,
-                                       ciStamps[*niS].x0, ciStamps[*niS].y0, iUKThresh,
+                check = checkPsfCenter(state, iRData, xmax-ciStamps[*niS].x0, ymax-ciStamps[*niS].y0, sPixX, sPixY,
+                                       ciStamps[*niS].x0, ciStamps[*niS].y0, state->iUKThresh,
                                        ciStamps[*niS].mode, 1. / ciStamps[*niS].fwhm,
                                        0, 0, bbiti1 | bbiti2 | 0xbf, bbiti1);
                 
                 /* its ok? */
                 if (check != 0.) {
                     /* globally mask out the region around this guy */
-                    for (l = ymax-hwKSStamp; l <= ymax+hwKSStamp; l++) {
+                    for (l = ymax-state->hwKSStamp; l <= ymax+state->hwKSStamp; l++) {
                         /*yr2 = l + ciStamps[*niS].y0;*/
                         
-                        for (k = xmax-hwKSStamp; k <= xmax+hwKSStamp; k++) {
+                        for (k = xmax-state->hwKSStamp; k <= xmax+state->hwKSStamp; k++) {
                             /*xr2 = k + ciStamps[*niS].x0;*/
-                            /*nr2 = xr2+rPixX*yr2;*/
-                            nr2 = l+rPixX*k;
+                            /*nr2 = xr2+state->rPixX*yr2;*/
+                            nr2 = l+state->rPixX*k;
                             
                             /*if ((k > 0) && (k < sPixX) && (l > 0) && (l < sPixY))*/
-                            if (nr2 >= 0 && nr2 < rPixX*rPixY)
-                                mRData[nr2] |= bbiti2;
+                            if (nr2 >= 0 && nr2 < state->rPixX*state->rPixY)
+                                state->mRData[nr2] |= bbiti2;
                         }
                     }
                     
                     ciStamps[*niS].xss[nss] = xmax;
                     ciStamps[*niS].yss[nss] = ymax;	    
                     ciStamps[*niS].nss += 1;
-                    if (verbose >= 2) fprintf(stderr,"     #%d @ %4d,%4d\n", nss, xmax, ymax);
+                    if (state->verbose >= 2) fprintf(stderr,"     #%d @ %4d,%4d\n", nss, xmax, ymax);
                     
                 }
             }
@@ -379,10 +378,10 @@ void cutStamp(float *data, float *refArea, int dxLen, int xMin, int yMin,
     return;
 }
 
-int cutSStamp(stamp_struct *stamp, float *iData) {
+int cutSStamp(hotpants_state_t *state, stamp_struct *stamp, float *iData) {
     /*****************************************************
      * NOTE: The Centers here are in the regions' coords
-     *    To grab them from the stamp, adjust using stamp->x0,y0
+     * To grab them from the stamp, adjust using stamp->x0,y0
      *****************************************************/
     
     int i, j, k, nss, sscnt;
@@ -390,8 +389,8 @@ int cutSStamp(stamp_struct *stamp, float *iData) {
     float dpt;
     double sum = 0.;
     
-    /*stamp->krefArea = (double *)realloc(stamp->krefArea, fwKSStamp*fwKSStamp*sizeof(double));*/
-    dfset(stamp->krefArea, fillVal, fwKSStamp, fwKSStamp);
+    /*stamp->krefArea = (double *)realloc(stamp->krefArea, state->fwKSStamp*state->fwKSStamp*sizeof(double));*/
+    dfset(stamp->krefArea, state->fillVal, state->fwKSStamp, state->fwKSStamp);
     
     nss    = stamp->nss;
     sscnt  = stamp->sscnt;
@@ -400,11 +399,11 @@ int cutSStamp(stamp_struct *stamp, float *iData) {
     
     /* have gone through all the good substamps, reject this stamp */
     if (sscnt >= nss) {
-        if (verbose >= 2)
+        if (state->verbose >= 2)
             fprintf(stderr, "    xs : %4i ys : %4i sig: %6.3f sscnt: %4i nss: %4i ******** REJECT stamp (out of substamps)\n",
                     stamp->x, stamp->y, stamp->chi2, sscnt, nss);
         else
-            if (verbose >= 1)
+            if (state->verbose >= 1)
                 fprintf(stderr, "        Reject stamp\n");
         return 1;
     }
@@ -412,21 +411,21 @@ int cutSStamp(stamp_struct *stamp, float *iData) {
       fprintf(stderr, "    xs : %4i ys : %4i substamp (sscnt=%d, nss=%d) xss: %4i yss: %4i\n",
       stamp->x, stamp->y, sscnt, nss, stamp->xss[sscnt], stamp->yss[sscnt]);
     */
-    if (verbose >= 1)
+    if (state->verbose >= 1)
         fprintf(stderr, "    xss : %4i yss : %4i\n", stamp->xss[sscnt], stamp->yss[sscnt]);
     
-    for (j = yStamp - hwKSStamp; j <= yStamp + hwKSStamp; j++) {
-        y  = j - (yStamp - hwKSStamp);
+    for (j = yStamp - state->hwKSStamp; j <= yStamp + state->hwKSStamp; j++) {
+        y  = j - (yStamp - state->hwKSStamp);
         dy = j + stamp->y0;
         
-        for (i = xStamp - hwKSStamp; i <= xStamp + hwKSStamp; i++) {
-            x = i - (xStamp - hwKSStamp);
+        for (i = xStamp - state->hwKSStamp; i <= xStamp + state->hwKSStamp; i++) {
+            x = i - (xStamp - state->hwKSStamp);
             
-            k   = i+stamp->x0 + rPixX*dy;
+            k   = i+stamp->x0 + state->rPixX*dy;
             dpt = iData[k];
             
-            stamp->krefArea[x+y*fwKSStamp] = dpt;
-            sum += (mRData[k] & FLAG_INPUT_ISBAD) ? 0 : fabs(dpt);
+            stamp->krefArea[x+y*state->fwKSStamp] = dpt;
+            sum += (state->mRData[k] & FLAG_INPUT_ISBAD) ? 0 : fabs(dpt);
         }
     }
     
@@ -434,7 +433,7 @@ int cutSStamp(stamp_struct *stamp, float *iData) {
     return 0;
 }
 
-double checkPsfCenter(float *iData, int imax, int jmax, int xLen, int yLen,
+double checkPsfCenter(hotpants_state_t *state, float *iData, int imax, int jmax, int xLen, int yLen,
                       int sx0, int sy0,
                       double hiThresh, float sky, float invdsky,
                       int xbuffer, int ybuffer, int bbit, int bbit1) {
@@ -446,7 +445,7 @@ double checkPsfCenter(float *iData, int imax, int jmax, int xLen, int yLen,
     double dmax2, dpt2;
     
     /* (5). after centroiding, re-check for fill/sat values and overlap (a little inefficient) */
-    /*      zero tolerance for bad pixels! */
+    /* zero tolerance for bad pixels! */
     brk   = 0;
     
     /* since we have zero tolerance for bad pixels, the sum
@@ -455,20 +454,20 @@ double checkPsfCenter(float *iData, int imax, int jmax, int xLen, int yLen,
        this!  well, sum of high sigma pixels anyways...*/
     dmax2 = 0.;
     
-    for (l = jmax-hwKSStamp; l <= jmax+hwKSStamp; l++) {
+    for (l = jmax-state->hwKSStamp; l <= jmax+state->hwKSStamp; l++) {
         if ((l < ybuffer) || (l >= yLen-ybuffer)) 
             continue; /* continue l loop */
         
         yr2 = l + sy0;
         
-        for (k = imax-hwKSStamp; k <= imax+hwKSStamp; k++) {
+        for (k = imax-state->hwKSStamp; k <= imax+state->hwKSStamp; k++) {
             if ((k < xbuffer) || (k >= xLen-xbuffer)) 
                 continue; /* continue k loop */
             
             xr2 = k + sx0;
-            nr2 = xr2+rPixX*yr2;
+            nr2 = xr2+state->rPixX*yr2;
             
-            if (mRData[nr2] & bbit) {
+            if (state->mRData[nr2] & bbit) {
                 brk = 1;
                 dmax2 = 0;
                 break; /* exit k loop */
@@ -477,13 +476,13 @@ double checkPsfCenter(float *iData, int imax, int jmax, int xLen, int yLen,
             dpt2   = iData[nr2];
             
             if (dpt2 >= hiThresh) {
-                mRData[nr2] |= bbit1;
+                state->mRData[nr2] |= bbit1;
                 brk = 1;
                 dmax2 = 0;
                 break; /* exit k loop */
             }
             
-            if (( (dpt2 - sky) * invdsky) > kerFitThresh)
+            if (( (dpt2 - sky) * invdsky) > state->kerFitThresh)
                 dmax2 += dpt2;
         }
         if (brk == 1)
@@ -493,11 +492,11 @@ double checkPsfCenter(float *iData, int imax, int jmax, int xLen, int yLen,
     return dmax2;
 }
 
-int getPsfCenters(stamp_struct *stamp, float *iData, int xLen, int yLen, double hiThresh, int bbit1, int bbit2) {
+int getPsfCenters(hotpants_state_t *state, stamp_struct *stamp, float *iData, int xLen, int yLen, double hiThresh, int bbit1, int bbit2) {
     /*****************************************************
      * Find the X highest independent maxima in the stamp
-     *   Subject to some stringent cuts
-     *   NOTE : THERE ARE SOME HARDWIRED THINGS IN HERE
+     * Subject to some stringent cuts
+     * NOTE : THERE ARE SOME HARDWIRED THINGS IN HERE
      *****************************************************/
     
     int i, j, k, l, nr, nr2, imax, jmax, xr, yr, xr2, yr2, sy0, sx0, xbuffer, ybuffer;
@@ -508,7 +507,7 @@ int getPsfCenters(stamp_struct *stamp, float *iData, int xLen, int yLen, double 
     
     float dfrac = 0.9;
     
-    if (stamp->nss >= nKSStamps) {
+    if (stamp->nss >= state->nKSStamps) {
         fprintf(stderr,"    no need for automatic substamp search...\n");
         return(0);
     }
@@ -532,16 +531,16 @@ int getPsfCenters(stamp_struct *stamp, float *iData, int xLen, int yLen, double 
     
     /* as low as we will go */
     /* was a 2 here before version 4.1.6 */
-    floor = sky + kerFitThresh * stamp->fwhm;
+    floor = sky + state->kerFitThresh * stamp->fwhm;
     
-    qs    = (int *)calloc(xLen*yLen/(hwKSStamp), sizeof(int));
-    xloc  = (int *)calloc(xLen*yLen/(hwKSStamp), sizeof(int));
-    yloc  = (int *)calloc(xLen*yLen/(hwKSStamp), sizeof(int));
-    peaks = (double *)calloc(xLen*yLen/(hwKSStamp), sizeof(double));
+    qs    = (int *)calloc(xLen*yLen/(state->hwKSStamp), sizeof(int));
+    xloc  = (int *)calloc(xLen*yLen/(state->hwKSStamp), sizeof(int));
+    yloc  = (int *)calloc(xLen*yLen/(state->hwKSStamp), sizeof(int));
+    peaks = (double *)calloc(xLen*yLen/(state->hwKSStamp), sizeof(double));
     
     brk  = 0;
     pcnt = 0;
-    fcnt = 2 * nKSStamps; /* maximum number of stamps to find */
+    fcnt = 2 * state->nKSStamps; /* maximum number of stamps to find */
     
     while (pcnt < fcnt) {
         
@@ -556,22 +555,22 @@ int getPsfCenters(stamp_struct *stamp, float *iData, int xLen, int yLen, double 
             
             for (i = xbuffer; i < xLen-xbuffer; i++) {
                 xr = i + sx0;
-                nr = xr+rPixX*yr;
+                nr = xr+state->rPixX*yr;
                 
                 /* (1). pixel already included in another stamp, or exceeds hiThresh */
-                if (mRData[nr] & bbit)
+                if (state->mRData[nr] & bbit)
                     continue;
                 
                 dpt = iData[nr];
                 
                 /* (2a). skip masked out value */
                 if (dpt >= hiThresh) {
-                    mRData[nr] |= bbit1;
+                    state->mRData[nr] |= bbit1;
                     continue;
                 }
                 
                 /* (2b). don't want low sigma point here, sometimes thats all that passes first test */
-                if (( (dpt - sky) * invdsky) < kerFitThresh)
+                if (( (dpt - sky) * invdsky) < state->kerFitThresh)
                     continue;
                 
                 /* finally, a good candidate! */
@@ -582,33 +581,33 @@ int getPsfCenters(stamp_struct *stamp, float *iData, int xLen, int yLen, double 
                     jmax  = j;
                     
                     /* center this candidate on the peak flux */
-                    for (l = j-hwKSStamp; l <= j+hwKSStamp; l++) {
+                    for (l = j-state->hwKSStamp; l <= j+state->hwKSStamp; l++) {
                         yr2 = l + sy0;
                         
                         if ((l < ybuffer) || (l >= yLen-ybuffer))
                             continue; /* continue l loop */
                         
-                        for (k = i-hwKSStamp; k <= i+hwKSStamp; k++) {
+                        for (k = i-state->hwKSStamp; k <= i+state->hwKSStamp; k++) {
                             xr2 = k + sx0;
-                            nr2 = xr2+rPixX*yr2;
+                            nr2 = xr2+state->rPixX*yr2;
                             
                             if ((k < xbuffer) || (k >= xLen-xbuffer))
                                 continue; /* continue k loop */
                             
                             /* (3). no fill/sat values within checked region, and not overlapping other stamp */
-                            if (mRData[nr2] & bbit)
+                            if (state->mRData[nr2] & bbit)
                                 continue; /* continue k loop */
                             
                             dpt2 = iData[nr2];
                             
                             /* (4a). no fill/sat values within checked region, and not overlapping other stamp */
                             if (dpt2 >= hiThresh) {
-                                mRData[nr2] |= bbit1;
+                                state->mRData[nr2] |= bbit1;
                                 continue; /* continue k loop */
                             }
                             
                             /* (4b). not as strong a problem, just don't want low sigma peak */
-                            if (( (dpt2 - sky) * invdsky) < kerFitThresh)
+                            if (( (dpt2 - sky) * invdsky) < state->kerFitThresh)
                                 continue;
                             
                             /* record position and amp of good point centroid in i,j,dmax */
@@ -621,14 +620,14 @@ int getPsfCenters(stamp_struct *stamp, float *iData, int xLen, int yLen, double 
                     }
                     
                     /* (5). after centroiding, re-check for fill/sat values and overlap (a little inefficient) */
-                    /*      zero tolerance for bad pixels! */
+                    /* zero tolerance for bad pixels! */
                     
                     /* since we have zero tolerance for bad pixels, the sum
                        of all the pixels in this box can be compared to the
                        sum of all the pixels in the other boxes.  rank on
                        this!  well, sum of high sigma pixels anyways...*/
                     
-                    dmax2 = checkPsfCenter(iData, imax, jmax, xLen, yLen, sx0, sy0,
+                    dmax2 = checkPsfCenter(state, iData, imax, jmax, xLen, yLen, sx0, sy0,
                                            hiThresh, sky, invdsky, xbuffer, ybuffer, bbit, bbit1);
                     
                     if (dmax2 == 0.)
@@ -640,15 +639,15 @@ int getPsfCenters(stamp_struct *stamp, float *iData, int xLen, int yLen, double 
                     peaks[pcnt++] = dmax2;
                     
                     /* globally mask out the region around this guy */
-                    for (l = jmax-hwKSStamp; l <= jmax+hwKSStamp; l++) {
+                    for (l = jmax-state->hwKSStamp; l <= jmax+state->hwKSStamp; l++) {
                         yr2 = l + sy0;
                         
-                        for (k = imax-hwKSStamp; k <= imax+hwKSStamp; k++) {
+                        for (k = imax-state->hwKSStamp; k <= imax+state->hwKSStamp; k++) {
                             xr2 = k + sx0;
-                            nr2 = xr2+rPixX*yr2;
+                            nr2 = xr2+state->rPixX*yr2;
                             
                             if ((k > 0) && (k < xLen) && (l > 0) && (l < yLen))
-                                mRData[nr2] |= bbit2;
+                                state->mRData[nr2] |= bbit2;
                         }
                     }
                     
@@ -669,11 +668,11 @@ int getPsfCenters(stamp_struct *stamp, float *iData, int xLen, int yLen, double 
         
     }
     
-    if (pcnt+stamp->nss < nKSStamps) {
-        if (verbose >= 2) fprintf(stderr, "    ...only found %d good substamps by autosearch\n", pcnt);
+    if (pcnt+stamp->nss < state->nKSStamps) {
+        if (state->verbose >= 2) fprintf(stderr, "    ...only found %d good substamps by autosearch\n", pcnt);
     }
     else {
-        if (verbose >= 2) fprintf(stderr, "    ...found %d good substamps by autosearch\n", pcnt);
+        if (state->verbose >= 2) fprintf(stderr, "    ...found %d good substamps by autosearch\n", pcnt);
     }
     
     /* coords are in region's pixels */
@@ -681,7 +680,7 @@ int getPsfCenters(stamp_struct *stamp, float *iData, int xLen, int yLen, double 
     /* no good full stamps */
     if (pcnt == 0) {
         /* changed in v4.1.6, don't accept center pixel, could be bad, worse than not having one! */
-        if (verbose >= 2) fprintf(stderr, "    NO good pixels, skipping...\n");
+        if (state->verbose >= 2) fprintf(stderr, "    NO good pixels, skipping...\n");
         
         free(qs);
         free(xloc);
@@ -691,11 +690,11 @@ int getPsfCenters(stamp_struct *stamp, float *iData, int xLen, int yLen, double 
     }
     else {
         quick_sort (peaks, qs, pcnt);
-        if (verbose >= 2) fprintf(stderr, "    Adding %d substamps found by autosearch\n", imin(pcnt, nKSStamps-stamp->nss));
-        for (i = stamp->nss, j = 0; j < pcnt && i < nKSStamps; i++,j++) {
+        if (state->verbose >= 2) fprintf(stderr, "    Adding %d substamps found by autosearch\n", imin(pcnt, state->nKSStamps-stamp->nss));
+        for (i = stamp->nss, j = 0; j < pcnt && i < state->nKSStamps; i++,j++) {
             stamp->xss[i] = xloc[qs[pcnt-j-1]] + sx0;
             stamp->yss[i] = yloc[qs[pcnt-j-1]] + sy0;
-            if (verbose >= 2) fprintf(stderr,"     #%d @ %4d,%4d,%8.1f\n", i, stamp->xss[i], stamp->yss[i], peaks[qs[pcnt-j-1]]); 
+            if (state->verbose >= 2) fprintf(stderr,"     #%d @ %4d,%4d,%8.1f\n", i, stamp->xss[i], stamp->yss[i], peaks[qs[pcnt-j-1]]); 
             stamp->nss++;
         }
     }
@@ -708,7 +707,7 @@ int getPsfCenters(stamp_struct *stamp, float *iData, int xLen, int yLen, double 
 }
 
 
-void getNoiseStats3(float *data, float *noise, double *nnorm, int *nncount, int umask, int smask) {
+void getNoiseStats3(hotpants_state_t *state, float *data, float *noise, double *nnorm, int *nncount, int umask, int smask) {
     /*
       good pixels : umask=0,      smask=0xffff
       ok   pixels : umask=0xff,   smask=0x8000
@@ -720,15 +719,15 @@ void getNoiseStats3(float *data, float *noise, double *nnorm, int *nncount, int 
     float ddat=0, ndat=0;
     
     
-    for (i = rPixX*rPixY; i--; ) {
+    for (i = state->rPixX*state->rPixY; i--; ) {
         ddat = data[i];
-        mdat = mRData[i];
+        mdat = state->mRData[i];
         
         /*
           fprintf(stderr, "CAW %d %f %f %f %d %d %d %d\n", n, nsum, ddat, ndat, mdat,
 	      ((umask > 0) && (!(mdat & umask))),
 	      ((smask > 0) &&   (mdat & smask)),
-	      (ddat == fillVal) || (fabs(ddat) <= ZEROVAL));
+	      (ddat == state->fillVal) || (fabs(ddat) <= ZEROVAL));
         */
         
         if (((umask > 0) && (!(mdat & umask))) ||
@@ -752,14 +751,14 @@ void getNoiseStats3(float *data, float *noise, double *nnorm, int *nncount, int 
     return;
 }
 
-int getStampStats3(float *data,
+int getStampStats3(hotpants_state_t *state, float *data,
                    int x0Reg, int y0Reg, int nPixX, int nPixY, 
                    double *sum, double *mean, double *median,
                    double *mode, double *sd, double *fwhm, double *lfwhm,
                    int umask, int smask, int maxiter) {
     /*****************************************************
      * Given an input image, return stats on the pixel distribution
-     *    This should be a masked distribution
+     * This should be a masked distribution
      *****************************************************/
     /*
       good pixels : umask=0,      smask=0xffff
@@ -806,7 +805,7 @@ int getStampStats3(float *data,
     goodcnt = 0;
     /* pull 100 random enough values from array to estimate required bin sizes */
     /* only do as many calls as there are points in the section! */
-    /* NOTE : ignore anything with fillVal or zero */
+    /* NOTE : ignore anything with state->fillVal or zero */
     for (i = 0; (i < nstat) && (goodcnt < npts); i++, goodcnt++) {
         xr = (int)floor(ran1(&idum)*nPixX);
         yr = (int)floor(ran1(&idum)*nPixY);
@@ -814,7 +813,7 @@ int getStampStats3(float *data,
         /* here data is size rPixX, rPixY */
         rdat = data[xr+yr*nPixX];
         /* region is rPixX, rPixY */
-        mdat = mRData[(xr+x0Reg)+(yr+y0Reg)*rPixX];
+        mdat = state->mRData[(xr+x0Reg)+(yr+y0Reg)*state->rPixX];
         
         if (((umask > 0) && (!(mdat & umask))) ||
             ((smask > 0) &&   (mdat & smask))  ||
@@ -834,7 +833,7 @@ int getStampStats3(float *data,
     for (j = 0; j < nPixY; j++) {
         for (i = 0; i < nPixX; i++) {
             rdat = data[i+j*nPixX];
-            mdat = mRData[(i+x0Reg)+(j+y0Reg)*rPixX];
+            mdat = state->mRData[(i+x0Reg)+(j+y0Reg)*state->rPixX];
             
             /* fprintf(stderr, "BIGT %d %d %f : %d %d %d\n", i, j, rdat, i+x0Reg, j+y0Reg, mdat); */
             /* looks like it works.  that is, the image pixel values
@@ -847,7 +846,7 @@ int getStampStats3(float *data,
                 continue;
             
             if (rdat*0.0 != 0.0) {
-                mRData[(i+x0Reg)+(j+y0Reg)*rPixX] |= (FLAG_INPUT_ISBAD | FLAG_ISNAN);
+                state->mRData[(i+x0Reg)+(j+y0Reg)*state->rPixX] |= (FLAG_INPUT_ISBAD | FLAG_ISNAN);
                 /* fprintf(stderr, "OUCH %d %d %f %d\n", i+x0Reg, j+y0Reg, rdat, mdat); */
                 continue;
             }
@@ -856,7 +855,7 @@ int getStampStats3(float *data,
             sdat[goodcnt++] = rdat;
         }
     }
-    if (sigma_clip(sdat, goodcnt, mean, sd, maxiter)) {
+    if (sigma_clip(state, sdat, goodcnt, mean, sd, maxiter)) {
         free(sdat);
         free(work);
         return 5;
@@ -887,7 +886,7 @@ int getStampStats3(float *data,
         for (j = 0; j < nPixY; j++) {
             for (i = 0; i < nPixX; i++) {
                 rdat = data[i+j*nPixX];
-                mdat = mRData[(i+x0Reg)+(j+y0Reg)*rPixX];
+                mdat = state->mRData[(i+x0Reg)+(j+y0Reg)*state->rPixX];
                 
                 if (((umask > 0) && (!(mdat & umask))) ||
                     ((smask > 0) &&   (mdat & smask))  ||
@@ -895,13 +894,13 @@ int getStampStats3(float *data,
                     continue;
                 
                 if (rdat*0.0 != 0.0) {
-                    mRData[(i+x0Reg)+(j+y0Reg)*rPixX] |= (FLAG_INPUT_ISBAD | FLAG_ISNAN);
+                    state->mRData[(i+x0Reg)+(j+y0Reg)*state->rPixX] |= (FLAG_INPUT_ISBAD | FLAG_ISNAN);
                     continue;
                 }
                 
                 /* final sigma cut */
                 /* reject both high and low here */
-                if ((fabs(rdat - (*mean)) * isd) > statSig)
+                if ((fabs(rdat - (*mean)) * isd) > state->statSig)
                     continue;
                 
                 index = floor( (rdat-bin1)/binsize ) + 1;
@@ -1026,7 +1025,7 @@ int getStampStats3(float *data,
     return 0;
 }
 
-int sigma_clip(float *data, int count, double *mean, double *stdev, int maxiter) {
+int sigma_clip(hotpants_state_t *state, float *data, int count, double *mean, double *stdev, int maxiter) {
     int cnt, ncnt, i, iter;
     char *smask;
     double istdev;
@@ -1082,7 +1081,7 @@ int sigma_clip(float *data, int count, double *mean, double *stdev, int maxiter)
         for (i=0; i<count; i++) {
             if (!(smask[i])) {
                 /* reject high and low outliers */
-                if ((fabs(data[i] - (*mean)) * istdev) > statSig) {
+                if ((fabs(data[i] - (*mean)) * istdev) > state->statSig) {
                     smask[i] = 1;
                 }
                 else {
@@ -1098,7 +1097,7 @@ int sigma_clip(float *data, int count, double *mean, double *stdev, int maxiter)
     return 0;
 }
 
-float *calculateAvgNoise(float *image, int *mask, int nx, int ny, int size, int maskval, int doavg) {
+float *calculateAvgNoise(hotpants_state_t *state, float *image, int *mask, int nx, int ny, int size, int maskval, int doavg) {
     /* if avg = 0, take stdev of pixel values (e.g in diffim) */
     /* if avg = 1, take mean of pixel values (e.g in noiseim)   */
     int i, j, ii, jj, cnt;
@@ -1129,7 +1128,7 @@ float *calculateAvgNoise(float *image, int *mask, int nx, int ny, int size, int 
                 }
             }
             /* we'll do no clipping */
-            sigma_clip(data, cnt, &mean, &stdev, 0);
+            sigma_clip(state, data, cnt, &mean, &stdev, 0);
             outim[i+j*nx] = doavg ? mean : stdev;
         }
     }
@@ -1138,18 +1137,18 @@ float *calculateAvgNoise(float *image, int *mask, int nx, int ny, int size, int 
 }
 
 
-void freeStampMem(stamp_struct *stamps, int nStamps) {
+void freeStampMem(hotpants_state_t *state, stamp_struct *stamps, int nStamps) {
     /*****************************************************
      * Free ctStamps allocation when ciStamps are used, vice versa
      *****************************************************/
     int i, j;
     if (stamps) {
         for (i = 0; i < nStamps; i++) {
-            for(j = 0; j < nCompKer + nBGVectors; j++) 
+            for(j = 0; j < state->nCompKer + state->nBGVectors; j++) 
                 if (stamps[i].vectors[j]) free(stamps[i].vectors[j]);
             if (stamps[i].vectors) free(stamps[i].vectors);
             
-            for (j = 0; j < nC; j++) 
+            for (j = 0; j < state->nC; j++) 
                 if (stamps[i].mat[j]) free(stamps[i].mat[j]);
             if (stamps[i].mat) free(stamps[i].mat);
             
@@ -1161,190 +1160,24 @@ void freeStampMem(stamp_struct *stamps, int nStamps) {
     }
 }
 
-float *makeNoiseImage4(float *iData, float invGain, float quad) {
+float *makeNoiseImage4(hotpants_state_t *state, float *iData, float invGain, float quad) {
     
     int    i;
     double qquad;
     float  *nData=NULL;
     
-    if ( !(nData = (float *)calloc(rPixX*rPixY, sizeof(float))))
+    if ( !(nData = (float *)calloc(state->rPixX*state->rPixY, sizeof(float))))
         return NULL;
     
     qquad = quad * quad;
     
-    for (i = rPixX*rPixY; i--; ) 
+    for (i = state->rPixX*state->rPixY; i--; ) 
         nData[i] = fabs(iData[i])*invGain + qquad;
     
     return nData;
 }
 
-// Commented out FITS-dependent function for library version
-/*
-void getKernelInfo(char *kimage) {
-    // This function has been disabled for the library version
-    // since it depends on FITS I/O which is now handled in Python
-    
-    fitsfile *kPtr;
-    int i, existsTable, status = 0;
-    char hKeyword[1024];
-    
-    // open the input kernel image
-    if ( fits_open_file(&kPtr, kimage, 0, &status) )
-        printError(status);
-    
-    // required keyword in primary HDU
-    if ( fits_read_key_log(kPtr, "KERINFO", &existsTable, NULL, &status) )
-        printError(status);
-    
-    if (!(existsTable)) {
-        fits_close_file(kPtr, &status);
-        fprintf(stderr, "This image does not appear to contain a kernel table, exiting...\n");
-        exit(1);
-    }
-    
-    // move to binary kernel table...
-    if ( fits_get_num_hdus(kPtr, &existsTable, &status) ||
-         fits_movabs_hdu(kPtr, existsTable, NULL, &status) ||
-         fits_read_key(kPtr, TINT,    "NGAUSS", &ngauss, NULL, &status) ||
-         fits_read_key(kPtr, TINT,    "FWKERN", &fwKernel, NULL, &status) ||
-         fits_read_key(kPtr, TINT,    "CKORDER", &kerOrder, NULL, &status) ||
-         fits_read_key(kPtr, TINT,    "BGORDER", &bgOrder, NULL, &status) )
-        printError(status);
-    
-    deg_fixe    = (int *)realloc(deg_fixe,      ngauss*sizeof(int));
-    sigma_gauss = (float *)realloc(sigma_gauss, ngauss*sizeof(float));
-    
-    // this took a while to figure out!
-    photNormalize = (char *)malloc(1*sizeof(char));
-    
-    sprintf(hKeyword, "PHOTNORM");
-    if (fits_read_key(kPtr, TSTRING, hKeyword, photNormalize, NULL, &status))
-        printError(status);
-    
-    // read kernel gaussian info
-    for (i = 0; i < ngauss; i++) {
-        sprintf(hKeyword, "DGAUSS%d", i+1);
-        if (fits_read_key(kPtr, TINT, hKeyword, &deg_fixe[i], NULL, &status))
-            printError(status);
-        sprintf(hKeyword, "SGAUSS%d", i+1);
-        if (fits_read_key(kPtr, TFLOAT, hKeyword, &sigma_gauss[i], NULL, &status))
-            printError(status);
-        
-        // important!
-        sigma_gauss[i] = (1.0/(2.0*sigma_gauss[i]*sigma_gauss[i]));
-    }
-    
-    if (fits_close_file(kPtr, &status) )
-        printError(status);
-    
-    return;
-}
-*/
-
-// Commented out additional FITS-dependent functions for library version
-/*
-void readKernel(char *kimage, int nRegion, double **tKerSol, double **iKerSol,
-                int *rXMin, int *rXMax, int *rYMin, int *rYMax,
-                double *meansigSubstamps, double *scatterSubstamps,
-                double *meansigSubstampsF, double *scatterSubstampsF,
-                double *diffrat, int *NskippedSubstamps) {
-    // read in kernel image for region
-    
-    fitsfile *kPtr;
-    int status = 0;
-    char hKeyword[1024], hInfo[1024];
-    
-    // open the input kernel image
-    if ( fits_open_file(&kPtr, kimage, 0, &status) )
-        printError(status);
-    
-    // grab stuff for this region
-    sprintf(hKeyword, "REGION%02d", nRegion);
-    if (fits_read_key(kPtr, TSTRING, hKeyword, &hInfo, NULL, &status))
-        printError(status);
-    
-    // get extent of region
-    if (sscanf(hInfo, "[%d:%d,%d:%d]", rXMin, rXMax, rYMin, rYMax) != 4) {
-        fprintf(stderr, "Problem with region %d (%s), exiting...\n", nRegion, hInfo);
-        exit(1);
-    }
-    // fits indexing starts at 1, code at 0
-    *rXMin -= 1;
-    *rXMax -= 1;
-    *rYMin -= 1;
-    *rYMax -= 1;
-    
-    // which way to convolve
-    sprintf(hKeyword, "CONVOL%02d", nRegion);
-    if (fits_read_key(kPtr, TSTRING, hKeyword, &hInfo, NULL, &status))
-        printError(status);
-    
-    // copy quality control stuff: mean sigma, scatter, # substamps skipped
-    sprintf(hKeyword, "SSSIG%02d", nRegion);
-    if (fits_read_key(kPtr, TDOUBLE, hKeyword, meansigSubstamps, NULL, &status))
-        printError(status);
-    
-    sprintf(hKeyword, "SSSCAT%02d", nRegion);
-    if (fits_read_key(kPtr, TDOUBLE, hKeyword, scatterSubstamps, NULL, &status))
-        printError(status);
-    
-    sprintf(hKeyword, "FSIG%02d", nRegion);
-    if (fits_read_key(kPtr, TDOUBLE, hKeyword, meansigSubstampsF, NULL, &status))
-        printError(status);
-    
-    sprintf(hKeyword, "FSCAT%02d", nRegion);
-    if (fits_read_key(kPtr, TDOUBLE, hKeyword, scatterSubstampsF, NULL, &status))
-        printError(status);
-    
-    // sometimes does not exist
-    sprintf(hKeyword, "NSCALO%02d", nRegion);
-    if (fits_read_key(kPtr, TDOUBLE, hKeyword, diffrat, NULL, &status)) {
-        *diffrat = 1;
-        status = 0;
-    }
-    
-    if (strncmp(hInfo, "TEMPLATE", 8)==0) {
-        forceConvolve = "t";
-        *tKerSol = (double *)realloc(*tKerSol, (nCompTotal+1)*sizeof(double));
-        
-        fits_get_kernel_btbl(kPtr, &(*tKerSol), nRegion);
-    }
-    else if (strncmp(hInfo, "IMAGE", 5)==0) {
-        forceConvolve = "i";
-        *iKerSol = (double *)realloc(*iKerSol, (nCompTotal+1)*sizeof(double));
-        
-        fits_get_kernel_btbl(kPtr, &(*iKerSol), nRegion);
-    }
-    
-    if (fits_close_file(kPtr, &status) )
-        printError(status);
-    
-    return;
-}
-
-void fits_get_kernel_btbl(fitsfile *kPtr, double **kernelSol, int nRegion) {
-    int status=0, existsTable;
-    
-    // move to binary kernel table...
-    if ( fits_get_num_hdus(kPtr, &existsTable, &status) ||
-         fits_movabs_hdu(kPtr, existsTable, NULL, &status) )
-        printError(status);
-    
-    memset(*kernelSol, 0, (nCompTotal+1)*sizeof(double));
-    if (fits_read_col(kPtr, TDOUBLE, nRegion+1, 1, 1, (nCompTotal+1), 0, *kernelSol, 0, &status))
-        printError(status);
-    
-    //
-    // fprintf(stderr, "OK %d, %f %f %f %f %f %f\n", nRegion, *kernelSol[0], *kernelSol[1],
-    // *kernelSol[192-1], *kernelSol[293-1],
-    // *kernelSol[294-1], *kernelSol[298-1]);
-    
-    return;
-}
-*/
-
-
-void spreadMask(int *mData, int width) {
+void spreadMask(hotpants_state_t *state, int *mData, int width) {
     /*****************************************************/
     /* spread mask by width size in all directions */
     /* it works, but is it too inefficient? */
@@ -1357,20 +1190,20 @@ void spreadMask(int *mData, int width) {
         return;
     }
     w2 = width/2;
-    for (j = 0; j < rPixY; j++) {
-        for (i = 0; i < rPixX; i++) {
-            if (mData[i+rPixX*j] & FLAG_INPUT_ISBAD) {
+    for (j = 0; j < state->rPixY; j++) {
+        for (i = 0; i < state->rPixX; i++) {
+            if (mData[i+state->rPixX*j] & FLAG_INPUT_ISBAD) {
                 for (k = -w2; k <= w2; k++) {
                     ii = i + k;
-                    if (ii < 0 || ii >= rPixX)
+                    if (ii < 0 || ii >= state->rPixX)
                         continue;
                     
                     for (l = -w2; l <= w2; l++) {
                         jj = j + l;
-                        if (jj < 0 || jj >= rPixY)
+                        if (jj < 0 || jj >= state->rPixY)
                             continue;
                         
-                        mData[ii+rPixX*jj] |= FLAG_OK_CONV * (!(mData[ii+rPixX*jj] & FLAG_INPUT_ISBAD));
+                        mData[ii+state->rPixX*jj] |= FLAG_OK_CONV * (!(mData[ii+state->rPixX*jj] & FLAG_INPUT_ISBAD));
                     }
                 }
             }
@@ -1379,213 +1212,24 @@ void spreadMask(int *mData, int width) {
     return;
 }
 
-void makeInputMask(float *tData, float *iData, int *mData) {
+void makeInputMask(hotpants_state_t *state, float *tData, float *iData, int *mData) {
     /*****************************************************/
     /* Construct input mask image, expand by fwKernel  */
     /*****************************************************/
     
     int i;
     
-    for (i = rPixX*rPixY; i--; ){
-        mData[i] |= (FLAG_INPUT_ISBAD | FLAG_BAD_PIXVAL) * (tData[i] == fillVal  || iData[i] == fillVal);
-        mData[i] |= (FLAG_INPUT_ISBAD | FLAG_SAT_PIXEL)  * (tData[i] >= tUThresh || iData[i] >= iUThresh);
-        mData[i] |= (FLAG_INPUT_ISBAD | FLAG_LOW_PIXEL)  * (tData[i] <= tLThresh || iData[i] <= iLThresh);
+    for (i = state->rPixX*state->rPixY; i--; ){
+        mData[i] |= (FLAG_INPUT_ISBAD | FLAG_BAD_PIXVAL) * (tData[i] == state->fillVal  || iData[i] == state->fillVal);
+        mData[i] |= (FLAG_INPUT_ISBAD | FLAG_SAT_PIXEL)  * (tData[i] >= state->tUThresh || iData[i] >= state->iUThresh);
+        mData[i] |= (FLAG_INPUT_ISBAD | FLAG_LOW_PIXEL)  * (tData[i] <= state->tLThresh || iData[i] <= state->iLThresh);
     }
     
-    spreadMask(mData, (int)(hwKernel*kfSpreadMask1));
+    spreadMask(state, mData, (int)(state->hwKernel*state->kfSpreadMask1));
     
     /* mask has value 0 for good pixels in the difference image */
     return;
 }
-
-/*
-int hp_fits_copy_header(fitsfile *iPtr, fitsfile *oPtr, int *status) {
-#define FSTRNCMP(a,b,n)  ((a)[0]<(b)[0]?-1:(a)[0]>(b)[0]?1:strncmp((a),(b),(n)))   
-    int nkeys, i;
-    long naxis;
-    char card[SCRLEN];
-    
-    if (fits_get_hdrspace(iPtr, &nkeys, NULL, status) ||
-        fits_read_key_lng(iPtr, "NAXIS", &naxis, NULL, status) )
-        return *status;
-    
-    // copy remaining keywords, excluding NAXIS?, EXTEND, and reference COMMENT keywords
-    for (i = 4 + naxis; i <= nkeys; i++) {
-        if (fits_read_record(iPtr, i, card, status))
-            break;
-        
-        if (FSTRNCMP(card, "EXTEND  ", 8) &&
-            FSTRNCMP(card, "COMMENT   FITS (Flexible Image Transport System) format is", 58) &&
-            FSTRNCMP(card, "COMMENT   and Astrophysics', volume 376, page 3", 47) ) {
-            if (fits_write_record(oPtr, card, status))
-                return *status;
-        }
-    }
-    return *status;
-}
-*/
-
-/*
-void hp_fits_correct_data(float *data, int npix, float bZero, float bScale, int makeShort) {
-    
-    float maxval=1e30, minval=-1e30;
-    int   i;
-    float *dptr;
-    int   *mptr;
-    
-    // BUYER BEWARE : the photometric rescaling of the kernel can take
-    // an innocent amount of flux and drive it higher than the allowed
-    // short maximum value.  we need to check for this here
-    // 
-    // %%% AND WATCH OUT FOR BSCALE MADNESS... %%%
-    
-    dptr = data;
-    mptr = mRData;
-    
-    if (makeShort) {
-        maxval =  32767. * bScale + bZero;
-        minval = -32768. * bScale + bZero;
-        
-        for (i = 0; i < npix; i++, dptr++, mptr++) {
-            if (*dptr > maxval) {
-                *dptr  = maxval;
-                *mptr |= FLAG_OUTPUT_ISBAD;
-            }
-            else if (*dptr < minval) {
-                *dptr  = minval;
-                *mptr |= FLAG_OUTPUT_ISBAD;
-            }
-        }
-    }
-    // extra check for NaN, probably not necessary
-    
-    //
-    // dptr = data;
-    // for (i = 0; i < npix; i++, dptr++) {
-    // if (*dptr*0 != 0)
-    // *dptr = fillVal;
-    // }
-    
-    return;
-}
-*/
-
-/*
-void hp_fits_correct_data_int(int *data, int npix, float bZero, float bScale, int makeShort) {
-    
-    float maxval=1e30, minval=-1e30;
-    int   i;
-    int  *dptr, *mptr;
-    
-    // BUYER BEWARE : the photometric rescaling of the kernel can take
-    // an innocent amount of flux and drive it higher than the allowed
-    // short maximum value.  we need to check for this here
-    //
-    // %%% AND WATCH OUT FOR BSCALE MADNESS... %%%
-    
-    dptr = data;
-    mptr = mRData;
-    
-    if (makeShort) {
-        maxval =  32767. * bScale + bZero;
-        minval = -32768. * bScale + bZero;
-        
-        for (i = 0; i < npix; i++, dptr++) {
-            if (*dptr > maxval) {
-                *dptr  = maxval;
-                *mptr |= FLAG_OUTPUT_ISBAD;
-            }
-            else if (*dptr < minval) {
-                *dptr  = minval;
-                *mptr |= FLAG_OUTPUT_ISBAD;
-            }
-        }
-    }
-    return;
-}
-*/
-
-/*
-int hp_fits_write_subset(fitsfile *fptr, long group, long naxis, long *naxes,
-                         float *data, int *status, int makeShort,
-                         float bZero, float bScale,
-                         int fpixelX, int fpixelY, int lpixelX, int lpixelY, int xArrayLo, int yArrayLo) {
-    
-    int   pixX, pixY, y, x;
-    float *dptr;
-    long  fpixel[2], lpixel[2];
-    
-    hp_fits_correct_data(data, (rPixX*rPixY), bZero, bScale, makeShort);
-    
-    pixX = lpixelX - fpixelX + 1;
-    pixY = lpixelY - fpixelY + 1;
-    
-    fpixel[0] = fpixelX;
-    lpixel[0] = lpixelX;
-    
-    dptr = data;
-    // get to the first row
-    for (y = 0; y < yArrayLo; y++)
-        for (x = 0; x < rPixX; x++, dptr++);
-    
-    for (y = 0; y < pixY; y++) {
-        
-        fpixel[1] = fpixelY + y;
-        lpixel[1] = fpixel[1];
-        
-        // get to first pixel in row to write
-        for (x = 0; x < xArrayLo; x++, dptr++);
-        
-        // this works!
-        fits_write_subset_flt(fptr, group, naxis, naxes, fpixel, lpixel, dptr, status);
-        
-        // clear the row, as fits_write_subset does not increment dptr
-        for (x = xArrayLo; x < rPixX; x++, dptr++);
-    }
-    return *status;
-}
-*/
-
-/*
-int hp_fits_write_subset_int(fitsfile *fptr, long group, long naxis, long *naxes,
-                             int *data, int *status, int makeShort,
-                             float bZero, float bScale,
-                             int fpixelX, int fpixelY, int lpixelX, int lpixelY, int xArrayLo, int yArrayLo) {
-    
-    int   pixX, pixY, y, x;
-    int  *dptr;
-    long  fpixel[2], lpixel[2];
-    
-    hp_fits_correct_data_int(data, (rPixX*rPixY), bZero, bScale, makeShort);
-    
-    pixX = lpixelX - fpixelX + 1;
-    pixY = lpixelY - fpixelY + 1;
-    
-    fpixel[0] = fpixelX;
-    lpixel[0] = lpixelX;
-    
-    dptr = data;
-    // get to the first row
-    for (y = 0; y < yArrayLo; y++)
-        for (x = 0; x < rPixX; x++, dptr++);
-    
-    for (y = 0; y < pixY; y++) {
-        
-        fpixel[1] = fpixelY + y;
-        lpixel[1] = fpixel[1];
-        
-        // get to first pixel in row to write
-        for (x = 0; x < xArrayLo; x++, dptr++);
-        
-        // this works!
-        fits_write_subset_int(fptr, group, naxis, naxes, fpixel, lpixel, dptr, status);
-        
-        // clear the row, as fits_write_subset does not increment dptr
-        for (x = xArrayLo; x < rPixX; x++, dptr++);
-    }
-    return *status;
-}
-*/
 
 void fset(float *data, double value, int nPixX, int nPixY) {
     int    i;
@@ -1603,16 +1247,6 @@ void dfset(double *data, double value, int nPixX, int nPixY) {
         *(d++) = value;
 }
 
-/*
-void printError(int status) {
-    // Print out cfitsio error messages and exit program
-    if (status) {
-        fits_report_error(stderr, status); // print error report
-        exit( status );    // terminate the program, returning error status
-    }
-    return;
-}
-*/
 
 #define M1 259200
 #define IA1 7141
@@ -1658,18 +1292,6 @@ double ran1(int *idum) {
     return temp;
 }
 
-#undef M1
-#undef IA1
-#undef IC1
-#undef RM1
-#undef M2
-#undef IA2
-#undef IC2
-#undef RM2
-#undef M3
-#undef IA3
-#undef IC3
-
 void quick_sort (double *list, int *index, int n) {
     
     int i;
@@ -1680,8 +1302,6 @@ void quick_sort (double *list, int *index, int n) {
     
     return;
 }
-
-
 
 void quick_sort_1(double *list, int *index, int left_end, int right_end) {
     int i,j,temp;
@@ -1711,11 +1331,12 @@ void quick_sort_1(double *list, int *index, int left_end, int right_end) {
 }
 
 /**** comparison call for the qsort ****/
-int flcomp(x,y)
-     double *x,*y;
+int flcomp(const void *x, const void *y)
 {
-    if (*x>*y) return(1);
-    else if (*x==*y) return(0);
+    const double *a = x;
+    const double *b = y;
+    if (*a > *b) return(1);
+    else if (*a==*b) return(0);
     else return(-1);
 }
 
@@ -1726,5 +1347,4 @@ int imin(int a, int b) {
 int imax(int a, int b) {
     if (a < b) { return b; }
     else { return a; }
-}   
-
+} 
