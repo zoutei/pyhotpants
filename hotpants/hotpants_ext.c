@@ -473,14 +473,6 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
         }
     }
 
-    // We are done with these C arrays, so free them.
-    freeStampMem(state, state->tStamps, state->nStamps);
-    free(state->tStamps);
-    state->tStamps = NULL;
-    freeStampMem(state, state->iStamps, state->nStamps);
-    free(state->iStamps);
-    state->iStamps = NULL;
-
     return Py_BuildValue("OO", t_stamps_list, i_stamps_list);
 }
 
@@ -559,9 +551,6 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
         }
     }
 
-    // Free C-allocated stamp memory before returning
-    freeStampMem(state, all_stamps, state->nS);
-    free(all_stamps);
     return Py_BuildValue("Od", result_list, fom);
 }
 /*
@@ -644,7 +633,7 @@ static PyObject *py_fit_kernel(PyObject *self, PyObject *args)
 
     // 3. Prepare return values
     npy_intp dims[] = {state->nCompTotal + 1};
-    double* kernel_sol_copy = (double*)malloc((state->nCompTotal + 1) * sizeof(double));
+    double *kernel_sol_copy = (double *)malloc((state->nCompTotal + 1) * sizeof(double));
     memcpy(kernel_sol_copy, kernel_sol, (state->nCompTotal + 1) * sizeof(double));
     PyObject *global_coeffs_array = PyArray_SimpleNewFromData(1, dims, NPY_DOUBLE, kernel_sol_copy);
     PyArray_ENABLEFLAGS((PyArrayObject *)global_coeffs_array, NPY_ARRAY_OWNDATA);
@@ -667,14 +656,13 @@ static PyObject *py_fit_kernel(PyObject *self, PyObject *args)
     PyDict_SetItemString(stats_dict, "scatter", PyFloat_FromDouble(scatter_substamps));
     PyDict_SetItemString(stats_dict, "nskipped", PyLong_FromLong(n_skipped_substamps));
 
-    // 4. Cleanup
-    freeStampMem(state, stamps, n_stamps);
-    free(stamps);
-    free(kernel_sol); 
+    // // 4. Cleanup
+    // freeStampMem(state, stamps, n_stamps);
+    // free(stamps);
+    // free(kernel_sol); 
 
     return Py_BuildValue("OOO", global_coeffs_array, final_stamps_list, stats_dict);
 }
-
 
 static PyObject *py_apply_kernel(PyObject *self, PyObject *args)
 {
@@ -695,44 +683,44 @@ static PyObject *py_apply_kernel(PyObject *self, PyObject *args)
         PyErr_SetString(PyExc_MemoryError, "Failed to allocate mask");
         return NULL;
     }
-    state->mRData = mRData_out; // Use this locally
-    state->kernel_vec = (double **)calloc(state->nCompKer, sizeof(double *));
-    if (!state->kernel_vec)
-    {
-        free(mRData_out);
-        PyErr_SetString(PyExc_MemoryError, "Failed to allocate kernel_vec");
-        return NULL;
-    }
+    
+    // Use the state's pre-allocated buffers, don't re-allocate them.
+    // The main deallocator will handle freeing them.
     getKernelVec(state);
-    state->kernel = (double *)calloc(state->fwKernel * state->fwKernel, sizeof(double));
-    if (!state->kernel)
-    {
-        free(mRData_out);
-        PyErr_SetString(PyExc_MemoryError, "Failed to allocate kernel");
-        return NULL;
-    }
-    state->kernel_coeffs = (double *)calloc(state->nCompKer, sizeof(double));
-    if (!state->kernel_coeffs)
-    {
-        free(mRData_out);
-        free(state->kernel);
-        PyErr_SetString(PyExc_MemoryError, "Failed to allocate kernel_coeffs");
-        return NULL;
-    }
+
     double *kernel_sol = (double *)PyArray_DATA(kernel_solution_arr);
     float *conv_image = (float *)calloc(state->nx * state->ny, sizeof(float));
-    float *variance_image = (float *)calloc(state->nx * state->ny, sizeof(float));
-    if (!conv_image || !variance_image)
+    if (!conv_image)
     {
-        free(conv_image);
-        free(variance_image);
         free(mRData_out);
         PyErr_SetString(PyExc_MemoryError, "Failed to allocate image data");
         return NULL;
     }
-    float *noise_sq_data = (float *)PyArray_DATA(noise_sq_arr);
 
-    spatial_convolve(state, (float *)PyArray_DATA(image_arr), &noise_sq_data, state->nx, state->ny, kernel_sol, conv_image, state->mRData);
+    // ========================================================================
+    // START FIX: Correctly handle memory for the noise/variance image
+    // ========================================================================
+    long num_pixels = state->nx * state->ny;
+    float *noise_sq_data_c_copy = (float *)malloc(num_pixels * sizeof(float));
+    if (!noise_sq_data_c_copy) {
+        free(conv_image);
+        free(mRData_out);
+        PyErr_SetString(PyExc_MemoryError, "Failed to allocate C-copy of noise data");
+        return NULL;
+    }
+    memcpy(noise_sq_data_c_copy, (float *)PyArray_DATA(noise_sq_arr), num_pixels * sizeof(float));
+
+    // Set the state's mRData to our output buffer for this operation
+    state->mRData = mRData_out;
+
+    spatial_convolve(state, (float *)PyArray_DATA(image_arr), &noise_sq_data_c_copy, state->nx, state->ny, kernel_sol, conv_image, state->mRData);
+    
+    // Unset the state's mRData pointer so it doesn't point to local memory anymore
+    state->mRData = NULL;
+    // ========================================================================
+    // END FIX
+    // ========================================================================
+
 
     npy_intp dims[] = {state->ny, state->nx};
     PyObject *conv_arr = PyArray_SimpleNewFromData(2, dims, NPY_FLOAT32, conv_image);
@@ -740,7 +728,7 @@ static PyObject *py_apply_kernel(PyObject *self, PyObject *args)
     {
         free(conv_image);
         free(mRData_out);
-        free(variance_image);
+        free(noise_sq_data_c_copy); // Clean up on error
         PyErr_SetString(PyExc_MemoryError, "Failed to create conv_arr");
         return NULL;
     }
@@ -749,17 +737,18 @@ static PyObject *py_apply_kernel(PyObject *self, PyObject *args)
     {
         free(conv_image);
         free(mRData_out);
-        free(variance_image);
+        free(noise_sq_data_c_copy); // Clean up on error
         PyErr_SetString(PyExc_MemoryError, "Failed to create mask_arr");
         return NULL;
     }
 
-    // Create an object for the convolved noise image
-    PyObject *conv_noise_sq_arr = PyArray_SimpleNewFromData(2, dims, NPY_FLOAT32, noise_sq_data);
+    // Create an object for the convolved noise image from the C-managed buffer.
+    PyObject *conv_noise_sq_arr = PyArray_SimpleNewFromData(2, dims, NPY_FLOAT32, noise_sq_data_c_copy);
     if (!conv_noise_sq_arr)
     {
         free(conv_image);
         free(mRData_out);
+        free(noise_sq_data_c_copy); // Clean up on error
         PyErr_SetString(PyExc_MemoryError, "Failed to create conv_noise_sq_arr");
         return NULL;
     }
@@ -767,29 +756,21 @@ static PyObject *py_apply_kernel(PyObject *self, PyObject *args)
     Py_INCREF(conv_arr);
     Py_INCREF(mask_arr);
     Py_INCREF(conv_noise_sq_arr);
+
+    // Transfer ownership of all C-allocated buffers to their respective NumPy arrays.
+    // NumPy will now be responsible for calling `free()` when the arrays are garbage collected.
     PyArray_ENABLEFLAGS((PyArrayObject *)conv_arr, NPY_ARRAY_OWNDATA);
     PyArray_ENABLEFLAGS((PyArrayObject *)mask_arr, NPY_ARRAY_OWNDATA);
     PyArray_ENABLEFLAGS((PyArrayObject *)conv_noise_sq_arr, NPY_ARRAY_OWNDATA);
-
-    for (int i = 0; i < state->nCompKer; ++i)
-        free(state->kernel_vec[i]);
-    free(state->kernel_vec);
-    state->kernel_vec = NULL;
-    free(state->kernel);
-    state->kernel = NULL;
-    free(state->kernel_coeffs);
-    state->kernel_coeffs = NULL;
-    free(variance_image);
-    state->mRData = NULL; // Unset the local use of this pointer
 
     return Py_BuildValue("OOO", conv_arr, mask_arr, conv_noise_sq_arr);
 }
 
 static PyObject *py_get_background_image(PyObject *self, PyObject *args)
 {
-    PyArrayObject *shape_arr, *kernel_sol_arr;
+    PyArrayObject *kernel_sol_arr;
     HotpantsStateObject *state_obj;
-    if (!PyArg_ParseTuple(args, "O!O!O!", &HotpantsState_Type, &state_obj, &PyArray_Type, &shape_arr, &PyArray_Type, &kernel_sol_arr))
+    if (!PyArg_ParseTuple(args, "O!O!", &HotpantsState_Type, &state_obj, &PyArray_Type, &kernel_sol_arr))
     {
         return NULL;
     }
@@ -1056,6 +1037,7 @@ static void init_hotpants_state(hotpants_state_t *state, int nx, int ny, const h
     state->nBGVectors = config->n_bg_vectors;
     state->nCompTotal = config->n_comp_total;
     state->nC = state->nCompKer + state->nBGVectors + 1;
+    state->kcStep = state->fwKernel;
 
     // Allocate memory for filters, kernels, and temporary arrays as in main.c
     state->temp = (float *)calloc((state->fwKSStamp + state->fwKernel) * state->fwKSStamp, sizeof(float));

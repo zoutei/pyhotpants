@@ -413,7 +413,7 @@ class Hotpants:
             target_noise_sq = t_noise_sq
 
         convolved_image, output_mask, conv_noise_sq = self.ext.apply_kernel(self._c_state, image_to_convolve, self.results["kernel_solution"], noise_to_convolve_sq)
-        bkg = self.ext.get_background_image(self._c_state, convolved_image.shape, self.results["kernel_solution"])
+        bkg = self.ext.get_background_image(self._c_state, self.results["kernel_solution"])
         convolved_image += bkg
 
         diff_image = target_image - convolved_image
