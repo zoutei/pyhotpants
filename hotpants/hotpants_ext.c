@@ -367,15 +367,32 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
         state->iStamps = NULL;
         return NULL;
     }
+
+    float *catalog_data = NULL;
+    int num_catalog_entries = 0;
     if (catalog_arr_obj && catalog_arr_obj != Py_None)
     {
-        // Get the data pointer and dimensions from the NumPy array
-        float *catalog_data = (float *)PyArray_DATA((PyArrayObject *)catalog_arr_obj);
+        catalog_data = (float *)PyArray_DATA((PyArrayObject *)catalog_arr_obj);
         npy_intp *dims = PyArray_DIMS((PyArrayObject *)catalog_arr_obj);
-        int num_catalog_entries = dims[0];
-        printf("Catalog provided with %d entries.\n", num_catalog_entries);
-        for (int i = 0; i < num_catalog_entries; ++i)
+        num_catalog_entries = dims[0];
+        printf("Using catalog with %d entries.\n", num_catalog_entries);
+    }
+    else
+    {
+        printf("No catalog provided, performing automated grid search.\n");
+    }
+
+    for (int l = 0; l < state->nStampY; l++)
+    {
+        for (int k = 0; k < state->nStampX; k++)
         {
+            // Define the search area for the current grid cell
+            int sXMin = rXMin + (int)(k * (float)(rXMax - rXMin + 1) / state->nStampX);
+            int sYMin = rYMin + (int)(l * (float)(rYMax - rYMin + 1) / state->nStampY);
+            int sXMax = imin(sXMin + state->fwStamp - 1, rXMax);
+            int sYMax = imin(sYMin + state->fwStamp - 1, rYMax);
+
+            // Initialize the stamp structures for this grid cell
             if (!(strncmp(state->forceConvolve_str, "i", 1) == 0))
             {
                 state->tStamps[ntS].sscnt = state->tStamps[ntS].nss = 0;
@@ -386,74 +403,63 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
                 state->iStamps[niS].sscnt = state->iStamps[niS].nss = 0;
                 state->iStamps[niS].chi2 = 0.0;
             }
-            double x_pos = catalog_data[i * 2];     // Access x coordinate
-            double y_pos = catalog_data[i * 2 + 1]; // Access y coordinate
-            // Replicating main.c logic: use 0 for no automatic search
-            buildStamps(state, rXMin, rXMax, rYMin, rYMax, &niS, &ntS, 0, rXMin, rYMin,
-                        state->iStamps, state->tStamps, (float *)PyArray_DATA(image_arr),
-                        (float *)PyArray_DATA(template_arr), (int)x_pos, (int)y_pos);
 
+            if (num_catalog_entries > 0)
+            {
+                // If a catalog is provided, find sources within this specific grid cell
+                for (int i = 0; i < num_catalog_entries; ++i)
+                {
+                    int x_pos = (int)lroundf(catalog_data[i * 2]);
+                    int y_pos = (int)lroundf(catalog_data[i * 2 + 1]);
+                    // Check if the source falls within the padded boundaries of the current cell
+                    if ((x_pos > sXMin + state->hwKernel + 1) && (x_pos < sXMax - state->hwKernel - 1) &&
+                        (y_pos > sYMin + state->hwKernel + 1) && (y_pos < sYMax - state->hwKernel - 1))
+                    {
+                        // Build stamps using the specific catalog coordinates (auto_search = 0)
+                        buildStamps(state, sXMin, sXMax, sYMin, sYMax, &niS, &ntS, 0, rXMin, rYMin,
+                                    state->iStamps, state->tStamps, (float *)PyArray_DATA(image_arr),
+                                    (float *)PyArray_DATA(template_arr), x_pos, y_pos);
+                        printf("Found source at (%d, %d) in catalog.\n", x_pos, y_pos);
+                    }
+                }
+            }
+            else
+            {
+                // No catalog, perform an automated search within the grid cell (auto_search = 1)
+                buildStamps(state, sXMin, sXMax, sYMin, sYMax, &niS, &ntS, 1, rXMin, rYMin,
+                            state->iStamps, state->tStamps, (float *)PyArray_DATA(image_arr),
+                            (float *)PyArray_DATA(template_arr), 0, 0);
+            }
+
+            // Increment stamp counters only if substamps were successfully found in this cell
             if (!(strncmp(state->forceConvolve_str, "i", 1) == 0))
             {
                 if (state->tStamps[ntS].nss > 0)
-                    ntS += 1;
+                    ntS++;
             }
             if (!(strncmp(state->forceConvolve_str, "t", 1) == 0))
             {
                 if (state->iStamps[niS].nss > 0)
-                    niS += 1;
+                    niS++;
             }
-        }
-    }
-    else
-    {
-        printf("No catalog provided, performing automated grid search.\n");
-        // Original logic for automated grid search
-        for (int l = 0; l < state->nStampY; l++)
-        {
-            for (int k = 0; k < state->nStampX; k++)
+            // Exit if stamp arrays are full to prevent overflow
+            if (ntS >= state->nStamps || niS >= state->nStamps)
             {
-                int sXMin = rXMin + (int)(k * (rXMax - rXMin + 1.0) / state->nStampX);
-                int sYMin = rYMin + (int)(l * (rYMax - rYMin + 1.0) / state->nStampY);
-                int sXMax = imin(sXMin + state->fwStamp - 1, rXMax);
-                int sYMax = imin(sYMin + state->fwStamp - 1, rYMax);
-
-                if (!(strncmp(state->forceConvolve_str, "i", 1) == 0))
-                {
-                    state->tStamps[ntS].sscnt = state->tStamps[ntS].nss = 0;
-                    state->tStamps[ntS].chi2 = 0.0;
-                }
-                if (!(strncmp(state->forceConvolve_str, "t", 1) == 0))
-                {
-                    state->iStamps[niS].sscnt = state->iStamps[niS].nss = 0;
-                    state->iStamps[niS].chi2 = 0.0;
-                }
-
-                // Replicating main.c logic: use 1 for automatic search
-                buildStamps(state, sXMin, sXMax, sYMin, sYMax, &niS, &ntS, 1, rXMin, rYMin,
-                            state->iStamps, state->tStamps, (float *)PyArray_DATA(image_arr),
-                            (float *)PyArray_DATA(template_arr), 0.0, 0.0);
-
-                if (!(strncmp(state->forceConvolve_str, "i", 1) == 0))
-                {
-                    if (state->tStamps[ntS].nss > 0)
-                        ntS += 1;
-                }
-                if (!(strncmp(state->forceConvolve_str, "t", 1) == 0))
-                {
-                    if (state->iStamps[niS].nss > 0)
-                        niS += 1;
-                }
+                l = state->nStampY; // Set outer loop condition to fail
+                break;
             }
         }
     }
     printf("Found %d template stamps and %d image stamps.\n", ntS, niS);
     PyObject *t_stamps_list = PyList_New(0);
-    if (!(strncmp(state->forceConvolve_str, "i", 1) == 0)) {
-        for (int i = 0; i < ntS; ++i) {
+    if (!(strncmp(state->forceConvolve_str, "i", 1) == 0))
+    {
+        for (int i = 0; i < ntS; ++i)
+        {
             PyObject *stamp_dict = PyDict_New();
             PyObject *substamps = PyList_New(0);
-            for (int j = 0; j < state->tStamps[i].nss; j++) {
+            for (int j = 0; j < state->tStamps[i].nss; j++)
+            {
                 PyObject *substamp_tuple = PyTuple_New(2);
                 PyTuple_SetItem(substamp_tuple, 0, PyFloat_FromDouble(state->tStamps[i].xss[j]));
                 PyTuple_SetItem(substamp_tuple, 1, PyFloat_FromDouble(state->tStamps[i].yss[j]));
@@ -463,13 +469,16 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
             PyList_Append(t_stamps_list, stamp_dict);
         }
     }
-    printf("Created template stamps list with size: %d\n", ntS);
+
     PyObject *i_stamps_list = PyList_New(0);
-    if (!(strncmp(state->forceConvolve_str, "t", 1) == 0)) {
-        for (int i = 0; i < niS; ++i) {
+    if (!(strncmp(state->forceConvolve_str, "t", 1) == 0))
+    {
+        for (int i = 0; i < niS; ++i)
+        {
             PyObject *stamp_dict = PyDict_New();
             PyObject *substamps = PyList_New(0);
-            for (int j = 0; j < state->iStamps[i].nss; j++) {
+            for (int j = 0; j < state->iStamps[i].nss; j++)
+            {
                 PyObject *substamp_tuple = PyTuple_New(2);
                 PyTuple_SetItem(substamp_tuple, 0, PyFloat_FromDouble(state->iStamps[i].xss[j]));
                 PyTuple_SetItem(substamp_tuple, 1, PyFloat_FromDouble(state->iStamps[i].yss[j]));
@@ -479,15 +488,6 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
             PyList_Append(i_stamps_list, stamp_dict);
         }
     }
-
-    // // Free temporary C arrays for stamps
-    // freeStampMem(state, state->tStamps, state->nStamps);
-    // free(state->tStamps);
-    // state->tStamps = NULL;
-
-    // freeStampMem(state, state->iStamps, state->nStamps);
-    // free(state->iStamps);
-    // state->iStamps = NULL;
 
     return Py_BuildValue("OO", t_stamps_list, i_stamps_list);
 }
@@ -1030,8 +1030,13 @@ static void init_hotpants_state(hotpants_state_t *state, int nx, int ny, const h
     state->sigma_gauss = (float *)malloc(state->ngauss * sizeof(float));
     memcpy(state->sigma_gauss, config->sigma_gauss, state->ngauss * sizeof(float));
     state->fwKernel = config->fwkernel;
-    state->fwStamp = 2 * state->hwKernel + 1;
-    state->hwStamp = state->hwKernel;
+
+    state->fwStamp = imin(state->nx / state->nRegX / state->nStampX,
+                          state->ny / state->nRegY / state->nStampY);
+    state->fwStamp -= state->fwKernel;
+    state->fwStamp -= state->fwStamp % 2 == 0 ? 1 : 0; /* hmmm, an odd shape... */
+
+    // state->hwStamp = state->hwKernel;
     state->fwKSStamp = config->fwksstamp;
     state->nStamps = state->nStampX * state->nStampY;
     state->nCompKer = config->ncomp_ker;
