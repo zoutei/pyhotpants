@@ -1,5 +1,21 @@
+import sys
 from setuptools import setup, Extension, find_packages
 import numpy as np
+
+# --- Platform-specific configuration ---
+if sys.platform == "win32":
+    # Windows-specific settings
+    libraries = []
+    extra_compile_args = []
+    define_macros = [
+        ("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION"),
+        # ("_CRT_SECURE_NO_WARNINGS", None),
+    ]
+else:
+    libraries = ["m"]
+    extra_compile_args = ["-g", "-O2", "-std=c99"]
+    define_macros = [("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")]
+# ------------------------------------
 
 hotpants_ext = Extension(
     "hotpants.hotpants_ext",
@@ -9,9 +25,9 @@ hotpants_ext = Extension(
         "src/functions.c",
     ],
     include_dirs=["src", np.get_include()],
-    libraries=["m"],
-    extra_compile_args=["-g", "-O2", "-std=c99"],
-    define_macros=[("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")],
+    libraries=libraries,
+    extra_compile_args=extra_compile_args,
+    define_macros=define_macros,
 )
 
 setup(
