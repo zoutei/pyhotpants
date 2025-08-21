@@ -294,7 +294,6 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
                         buildStamps(state, sXMin, sXMax, sYMin, sYMax, &niS, &ntS, 0, rXMin, rYMin,
                                     state->iStamps, state->tStamps, (float *)PyArray_DATA(image_arr),
                                     (float *)PyArray_DATA(template_arr), x_pos, y_pos);
-                        printf("Found source at (%d, %d) in catalog.\n", x_pos, y_pos);
                     }
                 }
             }
@@ -326,55 +325,56 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
         }
     }
     printf("Found %d template stamps and %d image stamps.\n", ntS, niS);
-    PyObject *t_stamps_list = PyList_New(0);
+
+    // New logic to return flat lists of substamp coordinates
+    PyObject *t_substamps_list = PyList_New(0);
+    PyObject *i_substamps_list = PyList_New(0);
+    int t_substamp_id = 0;
+    int i_substamp_id = 0;
+
     if (!(strncmp(state->forceConvolve_str, "i", 1) == 0))
     {
         for (int i = 0; i < ntS; ++i)
         {
-            PyObject *stamp_dict = PyDict_New();
-            PyObject *substamps = PyList_New(0);
             for (int j = 0; j < state->tStamps[i].nss; j++)
             {
-                PyObject *substamp_tuple = PyTuple_New(2);
-                PyTuple_SetItem(substamp_tuple, 0, PyFloat_FromDouble(state->tStamps[i].xss[j]));
-                PyTuple_SetItem(substamp_tuple, 1, PyFloat_FromDouble(state->tStamps[i].yss[j]));
-                PyList_Append(substamps, substamp_tuple);
+                PyObject *substamp_dict = PyDict_New();
+                PyDict_SetItemString(substamp_dict, "substamp_id", PyLong_FromLong(t_substamp_id++));
+                PyDict_SetItemString(substamp_dict, "stamp_group_id", PyLong_FromLong(i));
+                PyDict_SetItemString(substamp_dict, "x", PyFloat_FromDouble(state->tStamps[i].xss[j]));
+                PyDict_SetItemString(substamp_dict, "y", PyFloat_FromDouble(state->tStamps[i].yss[j]));
+                PyList_Append(t_substamps_list, substamp_dict);
             }
-            PyDict_SetItemString(stamp_dict, "substamps", substamps);
-            PyList_Append(t_stamps_list, stamp_dict);
         }
     }
 
-    PyObject *i_stamps_list = PyList_New(0);
     if (!(strncmp(state->forceConvolve_str, "t", 1) == 0))
     {
         for (int i = 0; i < niS; ++i)
         {
-            PyObject *stamp_dict = PyDict_New();
-            PyObject *substamps = PyList_New(0);
             for (int j = 0; j < state->iStamps[i].nss; j++)
             {
-                PyObject *substamp_tuple = PyTuple_New(2);
-                PyTuple_SetItem(substamp_tuple, 0, PyFloat_FromDouble(state->iStamps[i].xss[j]));
-                PyTuple_SetItem(substamp_tuple, 1, PyFloat_FromDouble(state->iStamps[i].yss[j]));
-                PyList_Append(substamps, substamp_tuple);
+                PyObject *substamp_dict = PyDict_New();
+                PyDict_SetItemString(substamp_dict, "substamp_id", PyLong_FromLong(i_substamp_id++));
+                PyDict_SetItemString(substamp_dict, "stamp_group_id", PyLong_FromLong(i));
+                PyDict_SetItemString(substamp_dict, "x", PyFloat_FromDouble(state->iStamps[i].xss[j]));
+                PyDict_SetItemString(substamp_dict, "y", PyFloat_FromDouble(state->iStamps[i].yss[j]));
+                PyList_Append(i_substamps_list, substamp_dict);
             }
-            PyDict_SetItemString(stamp_dict, "substamps", substamps);
-            PyList_Append(i_stamps_list, stamp_dict);
         }
     }
 
-    return Py_BuildValue("OO", t_stamps_list, i_stamps_list);
+    return Py_BuildValue("OO", t_substamps_list, i_substamps_list);
 }
 
 static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
 {
     PyArrayObject *conv_arr, *ref_arr, *noise_arr;
-    PyObject *stamps_list;
+    PyObject *substamps_coord_list;
     HotpantsStateObject *state_obj;
     char *conv_dir;
 
-    if (!PyArg_ParseTuple(args, "O!O!O!O!sO!", &HotpantsState_Type, &state_obj, &PyArray_Type, &conv_arr, &PyArray_Type, &ref_arr, &PyArray_Type, &noise_arr, &conv_dir, &PyList_Type, &stamps_list))
+    if (!PyArg_ParseTuple(args, "O!O!O!O!sO!", &HotpantsState_Type, &state_obj, &PyArray_Type, &conv_arr, &PyArray_Type, &ref_arr, &PyArray_Type, &noise_arr, &conv_dir, &PyList_Type, &substamps_coord_list))
     {
         return NULL;
     }
@@ -391,60 +391,119 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
     }
     getKernelVec(state);
 
-    state->nS = PyList_Size(stamps_list);
-    stamp_struct *all_stamps = (stamp_struct *)calloc(state->nS, sizeof(stamp_struct));
-    if (allocateStamps(state, all_stamps, state->nS))
+    int n_substamps_total = PyList_Size(substamps_coord_list);
+    int max_group_id = -1;
+    for (int i = 0; i < n_substamps_total; i++)
+    {
+        PyObject *substamp_dict = PyList_GetItem(substamps_coord_list, i);
+        int group_id = PyLong_AsLong(PyDict_GetItemString(substamp_dict, "stamp_group_id"));
+        if (group_id > max_group_id)
+        {
+            max_group_id = group_id;
+        }
+    }
+    int n_stamps = max_group_id + 1;
+
+    stamp_struct *all_stamps = (stamp_struct *)calloc(n_stamps, sizeof(stamp_struct));
+    if (allocateStamps(state, all_stamps, n_stamps))
     {
         free(all_stamps);
         PyErr_SetString(PyExc_MemoryError, "Failed to allocate stamps");
         return NULL;
     }
 
-    for (int i = 0; i < state->nS; i++)
+    for (int i = 0; i < n_substamps_total; i++)
     {
-        PyObject *stamp_dict = PyList_GetItem(stamps_list, i);
-        PyObject *substamps_list = PyDict_GetItemString(stamp_dict, "substamps");
-        int n_substamps = PyList_Size(substamps_list);
-
-        all_stamps[i].nss = n_substamps;
-        all_stamps[i].sscnt = 0;
-
-        for (int j = 0; j < n_substamps; j++)
-        {
-            PyObject *substamp_tuple = PyList_GetItem(substamps_list, j);
-            all_stamps[i].xss[j] = (int)PyFloat_AsDouble(PyTuple_GetItem(substamp_tuple, 0));
-            all_stamps[i].yss[j] = (int)PyFloat_AsDouble(PyTuple_GetItem(substamp_tuple, 1));
-        }
-
-        if (all_stamps[i].nss > 0)
-        {
-            fillStamp(state, &all_stamps[i], (float *)PyArray_DATA(conv_arr), (float *)PyArray_DATA(ref_arr));
-        }
+        PyObject *substamp_dict = PyList_GetItem(substamps_coord_list, i);
+        int group_id = PyLong_AsLong(PyDict_GetItemString(substamp_dict, "stamp_group_id"));
+        int current_nss = all_stamps[group_id].nss;
+        all_stamps[group_id].xss[current_nss] = (int)PyFloat_AsDouble(PyDict_GetItemString(substamp_dict, "x"));
+        all_stamps[group_id].yss[current_nss] = (int)PyFloat_AsDouble(PyDict_GetItemString(substamp_dict, "y"));
+        all_stamps[group_id].nss++;
     }
 
-    double fom = check_stamps(state, all_stamps, state->nS, (float *)PyArray_DATA(ref_arr), (float *)PyArray_DATA(noise_arr));
+    PyObject *fit_results_list = PyList_New(0);
+    npy_intp cutout_dims[] = {state->fwKSStamp, state->fwKSStamp};
 
-    PyObject *result_list = PyList_New(0);
-    if (!result_list)
+    // --- Data Extraction Stage ---
+    // Loop through every substamp individually to extract its data
+    for (int i = 0; i < n_substamps_total; i++)
     {
-        freeStampMem(state, all_stamps, state->nS);
-        free(all_stamps);
-        PyErr_SetString(PyExc_MemoryError, "Failed to create Python list");
-        return NULL;
-    }
-    for (int i = 0; i < state->nS; i++)
-    {
-        if (all_stamps[i].diff < state->kerSigReject)
+        PyObject *substamp_coord_dict = PyList_GetItem(substamps_coord_list, i);
+        int group_id = PyLong_AsLong(PyDict_GetItemString(substamp_coord_dict, "stamp_group_id"));
+        int x_coord = (int)PyFloat_AsDouble(PyDict_GetItemString(substamp_coord_dict, "x"));
+        int y_coord = (int)PyFloat_AsDouble(PyDict_GetItemString(substamp_coord_dict, "y"));
+
+        // Find the index of this substamp within its group
+        int substamp_idx_in_group = -1;
+        for (int j = 0; j < all_stamps[group_id].nss; j++)
         {
-            PyObject *good_stamp_dict = PyList_GetItem(stamps_list, i);
-            Py_INCREF(good_stamp_dict);
-            PyList_Append(result_list, good_stamp_dict);
+            if (all_stamps[group_id].xss[j] == x_coord && all_stamps[group_id].yss[j] == y_coord)
+            {
+                substamp_idx_in_group = j;
+                break;
+            }
         }
+
+        if (substamp_idx_in_group == -1)
+            continue; // Should not happen
+
+        // Set the active substamp and call fillStamp to populate the workspace
+        all_stamps[group_id].sscnt = substamp_idx_in_group;
+        fillStamp(state, &all_stamps[group_id], (float *)PyArray_DATA(conv_arr), (float *)PyArray_DATA(ref_arr));
+
+        PyObject *result_dict = PyDict_New();
+
+        // Extract convolved and reference cutouts
+        float *conv_cutout_data = (float *)malloc(state->fwKSStamp * state->fwKSStamp * sizeof(float));
+        float *ref_cutout_data = (float *)malloc(state->fwKSStamp * state->fwKSStamp * sizeof(float));
+        memcpy(conv_cutout_data, all_stamps[group_id].vectors[0], state->fwKSStamp * state->fwKSStamp * sizeof(float));
+        memcpy(ref_cutout_data, all_stamps[group_id].krefArea, state->fwKSStamp * state->fwKSStamp * sizeof(float));
+
+        // Manually extract noise cutout
+        float *noise_cutout_data = (float *)malloc(state->fwKSStamp * state->fwKSStamp * sizeof(float));
+        for (int j = 0; j < state->fwKSStamp; j++)
+        {
+            for (int k = 0; k < state->fwKSStamp; k++)
+            {
+                int nx = x_coord - state->hwKSStamp + k;
+                int ny = y_coord - state->hwKSStamp + j;
+                noise_cutout_data[k + j * state->fwKSStamp] = ((float *)PyArray_DATA(noise_arr))[nx + ny * state->nx];
+            }
+        }
+
+        PyObject *conv_cutout_arr = PyArray_SimpleNewFromData(2, cutout_dims, NPY_FLOAT32, conv_cutout_data);
+        PyObject *ref_cutout_arr = PyArray_SimpleNewFromData(2, cutout_dims, NPY_FLOAT32, ref_cutout_data);
+        PyObject *noise_cutout_arr = PyArray_SimpleNewFromData(2, cutout_dims, NPY_FLOAT32, noise_cutout_data);
+        PyArray_ENABLEFLAGS((PyArrayObject *)conv_cutout_arr, NPY_ARRAY_OWNDATA);
+        PyArray_ENABLEFLAGS((PyArrayObject *)ref_cutout_arr, NPY_ARRAY_OWNDATA);
+        PyArray_ENABLEFLAGS((PyArrayObject *)noise_cutout_arr, NPY_ARRAY_OWNDATA);
+
+        PyDict_SetItemString(result_dict, "image_cutout", (strcmp(conv_dir, "t") == 0) ? ref_cutout_arr : conv_cutout_arr);
+        PyDict_SetItemString(result_dict, "template_cutout", (strcmp(conv_dir, "t") == 0) ? conv_cutout_arr : ref_cutout_arr);
+        PyDict_SetItemString(result_dict, "noise_cutout", noise_cutout_arr);
+
+        PyList_Append(fit_results_list, result_dict);
     }
 
-    freeStampMem(state, all_stamps, state->nS);
+    // --- Fitting Stage ---
+    double fom = check_stamps(state, all_stamps, n_stamps, (float *)PyArray_DATA(ref_arr), (float *)PyArray_DATA(noise_arr));
+
+    // Add fit metrics to the results list
+    for (int i = 0; i < n_substamps_total; i++)
+    {
+        PyObject *result_dict = PyList_GetItem(fit_results_list, i);
+        PyObject *substamp_coord_dict = PyList_GetItem(substamps_coord_list, i);
+        int group_id = PyLong_AsLong(PyDict_GetItemString(substamp_coord_dict, "stamp_group_id"));
+
+        PyDict_SetItemString(result_dict, "fom", PyFloat_FromDouble(all_stamps[group_id].diff));
+        PyDict_SetItemString(result_dict, "chi2", PyFloat_FromDouble(all_stamps[group_id].chi2));
+        PyDict_SetItemString(result_dict, "survived_check", (all_stamps[group_id].diff < state->kerSigReject) ? Py_True : Py_False);
+    }
+
+    freeStampMem(state, all_stamps, n_stamps);
     free(all_stamps);
-    return Py_BuildValue("Od", result_list, fom);
+    return Py_BuildValue("dO", fom, fit_results_list);
 }
 
 static PyObject *py_fit_kernel(PyObject *self, PyObject *args)
@@ -520,16 +579,12 @@ static PyObject *py_fit_kernel(PyObject *self, PyObject *args)
     PyObject *global_coeffs_array = PyArray_SimpleNewFromData(1, dims, NPY_DOUBLE, kernel_sol_copy);
     PyArray_ENABLEFLAGS((PyArrayObject *)global_coeffs_array, NPY_ARRAY_OWNDATA);
 
-    PyObject *final_stamps_list = PyList_New(0);
+    PyObject *final_survivor_indices = PyList_New(0);
     for (int i = 0; i < n_stamps; i++)
     {
         if (stamps[i].sscnt < stamps[i].nss)
         {
-            PyObject *stamp_dict = PyDict_New();
-            PyDict_SetItemString(stamp_dict, "x", PyFloat_FromDouble(stamps[i].xss[stamps[i].sscnt]));
-            PyDict_SetItemString(stamp_dict, "y", PyFloat_FromDouble(stamps[i].yss[stamps[i].sscnt]));
-            PyDict_SetItemString(stamp_dict, "figure_of_merit", PyFloat_FromDouble(stamps[i].chi2));
-            PyList_Append(final_stamps_list, stamp_dict);
+            PyList_Append(final_survivor_indices, PyLong_FromLong(i));
         }
     }
 
@@ -542,7 +597,7 @@ static PyObject *py_fit_kernel(PyObject *self, PyObject *args)
     free(stamps);
     free(kernel_sol);
 
-    return Py_BuildValue("OOO", global_coeffs_array, final_stamps_list, stats_dict);
+    return Py_BuildValue("OOO", global_coeffs_array, stats_dict, final_survivor_indices);
 }
 
 static PyObject *py_apply_kernel(PyObject *self, PyObject *args)
@@ -982,10 +1037,10 @@ static PyObject *hotpants_state_init_from_config(PyObject *self, PyObject *args)
     // Allocate memory for PCA vectors if use_pca is enabled
     if (state->usePCA)
     {
-        state->PCA = (double **)calloc(state->nCompKer, sizeof(double *));
+        state->PCA = (float **)calloc(state->nCompKer, sizeof(float *));
         for (int i = 0; i < state->nCompKer; ++i)
         {
-            state->PCA[i] = (double *)calloc(state->fwKernel * state->fwKernel, sizeof(double));
+            state->PCA[i] = (float *)calloc(state->fwKernel * state->fwKernel, sizeof(float));
         }
     }
 

@@ -9,6 +9,7 @@ fine-grained control.
 
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
+from enum import Enum, auto
 
 # C extension will be imported dynamically
 hotpants_ext = None
@@ -28,13 +29,42 @@ def _get_ext():
     return hotpants_ext
 
 
-__version__ = "1.0.0"
+__version__ = "0.1.0"
 
 
 class HotpantsError(Exception):
     """Exception raised for HOTPANTS-specific errors."""
 
     pass
+
+
+# New Data Models for Substamp Tracking
+class SubstampStatus(Enum):
+    """Enumeration for the status of a substamp during the fitting process."""
+
+    FOUND = auto()
+    PASSED_FOM_CHECK = auto()
+    REJECTED_FOM_CHECK = auto()
+    USED_IN_FINAL_FIT = auto()
+    REJECTED_ITERATIVE_FIT = auto()
+
+
+class Substamp:
+    """Data class to hold all information about a single substamp."""
+
+    def __init__(self, substamp_id: int, stamp_group_id: int, x: float, y: float):
+        self.id: int = substamp_id
+        self.stamp_group_id: int = stamp_group_id
+        self.x: float = x
+        self.y: float = y
+        self.status: SubstampStatus = SubstampStatus.FOUND
+        self.image_cutout: Optional[np.ndarray] = None
+        self.template_cutout: Optional[np.ndarray] = None
+        self.noise_variance_cutout: Optional[np.ndarray] = None
+        self.fit_results: Dict[str, Dict[str, float]] = {}
+
+    def __repr__(self) -> str:
+        return f"Substamp(id={self.id}, group={self.stamp_group_id}, coords=({self.x:.2f}, {self.y:.2f}), status={self.status.name})"
 
 
 class HotpantsConfig:
@@ -207,8 +237,8 @@ class Hotpants:
         self.ny, self.nx = self.template_data.shape
 
         self.config = config if config is not None else HotpantsConfig(nx=self.nx, ny=self.ny)
-        self._t_error_input = t_error
-        self._i_error_input = i_error
+        self._t_error_input = np.ascontiguousarray(t_error, dtype=np.float32) if t_error is not None else None
+        self._i_error_input = np.ascontiguousarray(i_error, dtype=np.float32) if i_error is not None else None
 
         if star_catalog is not None:
             if not isinstance(star_catalog, np.ndarray) or star_catalog.ndim != 2 or star_catalog.shape[1] != 2:
@@ -218,6 +248,9 @@ class Hotpants:
             self.star_catalog = None
 
         self.results = {}
+        # New master lists for substamp objects
+        self.template_substamps: List[Substamp] = []
+        self.image_substamps: List[Substamp] = []
 
         # Dynamically set thresholds if not provided
         if self.config.tuthresh is None:
@@ -235,9 +268,14 @@ class Hotpants:
 
         # Initialize C state object and pre-compute masks and noise images
         self._c_state = self.ext.HotpantsState(self.nx, self.ny, self.config.to_dict())
+        print(f"Initialized HOTPANTS state: {self._c_state}")
 
         # 1. Create the initial input mask from the images and C extension.
-        input_mask = self.ext.make_input_mask(self._c_state, self.template_data, self.image_data, t_mask, i_mask)
+        self._t_mask_input = np.ascontiguousarray(t_mask, dtype=np.int32) if t_mask is not None else None
+        self._i_mask_input = np.ascontiguousarray(i_mask, dtype=np.int32) if i_mask is not None else None
+
+        input_mask = self.ext.make_input_mask(self._c_state, self.template_data, self.image_data, self._t_mask_input, self._i_mask_input)
+        print(f"Input mask created with shape: {input_mask.shape}, dtype: {input_mask.dtype}")
         self.results["input_mask"] = input_mask
 
         # 2. Generate noise images using C extension if not provided by the user.
@@ -272,92 +310,133 @@ class Hotpants:
         if a1.shape != a2.shape:
             raise HotpantsError(f"{names} must have the same dimensions")
 
-    def find_stamps(self) -> Tuple[List[Dict], List[Dict]]:
+    def find_stamps(self) -> Tuple[List[Substamp], List[Substamp]]:
         """
-        Step 1: Finds potential stamps for kernel fitting.
-        This method now dispatches to the C extension function with the appropriate
-        parameters based on whether a star catalog is provided.
-
-        Returns:
-            List[Tuple[float, float]]: A list of (x, y) coordinates for the found stamps.
+        Step 1: Finds potential substamp coordinates.
+        This populates the master lists with Substamp objects containing only coordinate data.
         """
-        t_stamps, i_stamps = self.ext.find_stamps(self._c_state, self.template_data, self.image_data, self.config.fitthresh, self.star_catalog)
+        t_substamps_coords, i_substamps_coords = self.ext.find_stamps(self._c_state, self.template_data, self.image_data, self.config.fitthresh, self.star_catalog)
 
-        num_t_stamps = len(t_stamps)
-        num_i_stamps = len(i_stamps)
+        self.template_substamps = [Substamp(**coords) for coords in t_substamps_coords]
+        self.image_substamps = [Substamp(**coords) for coords in i_substamps_coords]
 
         if self.config.verbose >= 1:
-            print(f"Found {num_t_stamps} template stamps and {num_i_stamps} image stamps.")
+            print(f"Found {len(self.template_substamps)} potential template substamps and {len(self.image_substamps)} potential image substamps.")
 
-        if num_t_stamps == 0 and num_i_stamps == 0:
-            raise HotpantsError("No valid stamps found for kernel fitting.")
+        if not self.template_substamps and not self.image_substamps:
+            raise HotpantsError("No valid substamps found for kernel fitting.")
 
-        self.results["t_stamps_data"] = t_stamps
-        self.results["i_stamps_data"] = i_stamps
-        return t_stamps, i_stamps
+        return self.template_substamps, self.image_substamps
 
-    def fit_and_select_direction(self) -> Tuple[str, List[Dict]]:
+    def fit_and_select_direction(self) -> str:
         """
-        Step 2: Performs initial kernel fits for both convolution directions and selects
-        the best one based on the figure of merit.
-
-        Returns:
-            Tuple[str, List[Dict[str, Any]]]: The chosen convolution direction ('t' or 'i')
-                and the list of best-fit stamps with their figure of merit.
+        Step 2: Performs initial fits, populates substamp data, and selects the best
+        convolution direction. Updates the status of all tested substamps.
         """
-        if "t_stamps_data" not in self.results:
+        if not self.template_substamps and not self.image_substamps:
             self.find_stamps()
 
         combined_error_sq = self.results["t_noise_sq"] + self.results["i_noise_sq"]
+        t_fom, i_fom = float("inf"), float("inf")
+        t_fit_results, i_fit_results = None, None
 
+        # Fit template-derived substamps
+        if self.template_substamps:
+            t_coords = [{"substamp_id": s.id, "stamp_group_id": s.stamp_group_id, "x": s.x, "y": s.y} for s in self.template_substamps]
+            t_fom, t_fit_results = self.ext.fit_stamps_and_get_fom(self._c_state, self.template_data, self.image_data, combined_error_sq, "t", t_coords)
+            for substamp, result in zip(self.template_substamps, t_fit_results):
+                substamp.image_cutout = result["image_cutout"]
+                substamp.template_cutout = result["template_cutout"]
+                substamp.noise_variance_cutout = result["noise_cutout"]
+                substamp.fit_results["t"] = {"fom": result["fom"], "chi2": result["chi2"]}
+
+        # Fit image-derived substamps
+        if self.image_substamps:
+            i_coords = [{"substamp_id": s.id, "stamp_group_id": s.stamp_group_id, "x": s.x, "y": s.y} for s in self.image_substamps]
+            i_fom, i_fit_results = self.ext.fit_stamps_and_get_fom(self._c_state, self.image_data, self.template_data, combined_error_sq, "i", i_coords)
+            for substamp, result in zip(self.image_substamps, i_fit_results):
+                substamp.image_cutout = result["image_cutout"]
+                substamp.template_cutout = result["template_cutout"]
+                substamp.noise_variance_cutout = result["noise_cutout"]
+                substamp.fit_results["i"] = {"fom": result["fom"], "chi2": result["chi2"]}
+
+        # Select best direction
         conv_direction = self.config.force_convolve
         if conv_direction == "b":
-            t_fits, t_fom = self.ext.fit_stamps_and_get_fom(self._c_state, self.template_data, self.image_data, combined_error_sq, "t", self.results["t_stamps_data"])
-            i_fits, i_fom = self.ext.fit_stamps_and_get_fom(self._c_state, self.image_data, self.template_data, combined_error_sq, "i", self.results["i_stamps_data"])
             conv_direction = "t" if t_fom < i_fom else "i"
-            best_fits = t_fits if t_fom < i_fom else i_fits
             if self.config.verbose >= 1:
-                print(f"Template FOM: {t_fom:.3f}, Image FOM: {i_fom:.3f}. Convolving: {conv_direction}")
-        else:
-            stamps_to_fit = self.results["t_stamps_data"] if conv_direction == "t" else self.results["i_stamps_data"]
-            conv_img, ref_img = (self.template_data, self.image_data) if conv_direction == "t" else (self.image_data, self.template_data)
-            best_fits, _ = self.ext.fit_stamps_and_get_fom(self._c_state, conv_img, ref_img, combined_error_sq, conv_direction, stamps_to_fit)
+                print(f"Template FOM: {t_fom:.3f}, Image FOM: {i_fom:.3f}. Selecting direction: '{conv_direction}'")
+
+        # Update status based on the winning direction
+        if conv_direction == "t":
+            for substamp, result in zip(self.template_substamps, t_fit_results):
+                substamp.status = SubstampStatus.PASSED_FOM_CHECK if result["survived_check"] else SubstampStatus.REJECTED_FOM_CHECK
+        else:  # 'i'
+            for substamp, result in zip(self.image_substamps, i_fit_results):
+                substamp.status = SubstampStatus.PASSED_FOM_CHECK if result["survived_check"] else SubstampStatus.REJECTED_FOM_CHECK
 
         self.results["conv_direction"] = conv_direction
-        self.results["best_fits"] = best_fits
-        return conv_direction, best_fits
+        return conv_direction
 
-    def iterative_fit_and_clip(self) -> Tuple[np.ndarray, List[Dict]]:
+    def iterative_fit_and_clip(self) -> Tuple[np.ndarray, List[Substamp]]:
         """
-        Step 3 & 4: Performs iterative clipping of stamps and computes the global kernel solution.
-
-        Returns:
-            Tuple containing:
-                - np.ndarray: The array of global kernel and background coefficients.
-                - List[Dict[str, Any]]: The final, clipped list of best-fit stamps.
+        Step 3 & 4: Performs iterative clipping and computes the global kernel solution.
+        Updates the status of candidate substamps to reflect the outcome.
         """
-        if "best_fits" not in self.results:
+        if "conv_direction" not in self.results:
             self.fit_and_select_direction()
         if self.config.verbose >= 1:
             print("Starting iterative kernel fit and solution...")
 
         conv_direction = self.results["conv_direction"]
+        candidate_substamps = self.template_substamps if conv_direction == "t" else self.image_substamps
+
+        # Create a list of stamps for the C function, grouping substamps by group_id
+        stamps_for_fit = []
+        substamp_map = {}  # Maps group_id to a list of substamp objects
+        for s in candidate_substamps:
+            if s.status == SubstampStatus.PASSED_FOM_CHECK:
+                if s.stamp_group_id not in substamp_map:
+                    substamp_map[s.stamp_group_id] = []
+                substamp_map[s.stamp_group_id].append(s)
+
+        # This list preserves the order for matching survivor indices later
+        candidate_stamps_in_order = []
+        for group_id in sorted(substamp_map.keys()):
+            substamps_in_group = substamp_map[group_id]
+            stamps_for_fit.append({"substamps": [(s.x, s.y) for s in substamps_in_group]})
+            candidate_stamps_in_order.append(substamps_in_group[0])  # Representative stamp
+
+        if not stamps_for_fit:
+            raise HotpantsError("No substamps passed the initial FOM check.")
+
         if conv_direction == "t":
             conv_img, ref_img = self.template_data, self.image_data
         else:
             conv_img, ref_img = self.image_data, self.template_data
 
-        kernel_solution, final_fits, stats = self.ext.fit_kernel(self._c_state, self.results["best_fits"], conv_img, ref_img, self.results["t_noise_sq"] + self.results["i_noise_sq"])
+        kernel_solution, stats, final_survivor_indices = self.ext.fit_kernel(self._c_state, stamps_for_fit, conv_img, ref_img, self.results["t_noise_sq"] + self.results["i_noise_sq"])
 
-        if len(final_fits) == 0:
+        final_fits_substamps = []
+        survivor_group_ids = {candidate_stamps_in_order[i].stamp_group_id for i in final_survivor_indices}
+
+        for s in candidate_substamps:
+            if s.status == SubstampStatus.PASSED_FOM_CHECK:
+                if s.stamp_group_id in survivor_group_ids:
+                    s.status = SubstampStatus.USED_IN_FINAL_FIT
+                    final_fits_substamps.append(s)
+                else:
+                    s.status = SubstampStatus.REJECTED_ITERATIVE_FIT
+
+        if not final_fits_substamps:
             raise HotpantsError("All stamps were clipped during iterative fitting.")
         if self.config.verbose >= 1:
-            print(f"Final fit uses {len(final_fits)} stamps. Fit stats: mean_sig={stats['meansig']:.3f}, scatter={stats['scatter']:.3f}")
+            print(f"Final fit uses {len(final_survivor_indices)} stamp groups. Fit stats: mean_sig={stats['meansig']:.3f}, scatter={stats['scatter']:.3f}")
 
         self.results["kernel_solution"] = kernel_solution
-        self.results["final_fits"] = final_fits
+        self.results["final_fits"] = final_fits_substamps
         self.results["fit_stats"] = stats
-        return kernel_solution, final_fits
+        return kernel_solution, final_fits_substamps
 
     def convolve_and_difference(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -442,3 +521,15 @@ class Hotpants:
         self.iterative_fit_and_clip()
         self.convolve_and_difference()
         return self.get_final_outputs()
+
+    def get_substamp_details(self) -> Dict[str, Any]:
+        """
+        Returns the complete, stateful master lists of all substamps and a
+        summary of the locations used in the final fit.
+        """
+        if "conv_direction" not in self.results:
+            raise HotpantsError("Pipeline must be run (at least to iterative_fit_and_clip) before getting substamp details.")
+
+        final_fit_locations = [{"id": s.id, "x": s.x, "y": s.y} for s in self.template_substamps + self.image_substamps if s.status == SubstampStatus.USED_IN_FINAL_FIT]
+
+        return {"template_substamps": self.template_substamps, "image_substamps": self.image_substamps, "final_fit_locations": {"convolution_direction": self.results["conv_direction"], "locations": final_fit_locations}}
