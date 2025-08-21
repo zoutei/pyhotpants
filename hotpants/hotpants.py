@@ -236,13 +236,8 @@ class Hotpants:
         # Initialize C state object and pre-compute masks and noise images
         self._c_state = self.ext.HotpantsState(self.nx, self.ny, self.config.to_dict())
 
-        # --- NEW LOGIC: Pass external masks to the C function directly for proper combination ---
-
         # 1. Create the initial input mask from the images and C extension.
-        # Pass the external masks directly to the C function.
-        # The C function will handle validation.
         input_mask = self.ext.make_input_mask(self._c_state, self.template_data, self.image_data, t_mask, i_mask)
-
         self.results["input_mask"] = input_mask
 
         # 2. Generate noise images using C extension if not provided by the user.
@@ -251,19 +246,18 @@ class Hotpants:
             t_noise_sq = np.ascontiguousarray(self._t_error_input**2, dtype=np.float32)
         else:
             # Generate noise image from scratch and square it.
-            t_noise_sq = self.ext.calculate_noise_image(self._c_state, self.template_data, is_template=True)
+            t_noise_sq = self.ext.calculate_noise_image(self._c_state, self.template_data, True)
 
         if self._i_error_input is not None:
             # Use user-provided noise image, squared.
             i_noise_sq = np.ascontiguousarray(self._i_error_input**2, dtype=np.float32)
         else:
             # Generate noise image from scratch and square it.
-            i_noise_sq = self.ext.calculate_noise_image(self._c_state, self.image_data, is_template=False)
+            i_noise_sq = self.ext.calculate_noise_image(self._c_state, self.image_data, False)
 
         # 3. Store the squared noise images for later use.
         self.results["t_noise_sq"] = t_noise_sq
         self.results["i_noise_sq"] = i_noise_sq
-        # ---------------------------------------------------------------
 
     def __del__(self):
         """Ensures the C state object is properly deallocated."""
@@ -287,17 +281,7 @@ class Hotpants:
         Returns:
             List[Tuple[float, float]]: A list of (x, y) coordinates for the found stamps.
         """
-        # fit_thresh = self.config.fitthresh
-        # attempts = 0
-        # all_stamps = []
-        # input_mask = self.results["input_mask"]
-
-        # # This loop now handles both catalog-based and automated stamp finding
-        # while attempts < 2:
-        #     if attempts > 0 and self.config.verbose >= 1:
-        #         print(f"Attempt {attempts + 1}: Too few stamps, scaling down threshold to {fit_thresh}")
-
-        t_stamps, i_stamps = self.ext.find_stamps(self._c_state, self.template_data, self.image_data, self.results["input_mask"], self.config.fitthresh, self.star_catalog)
+        t_stamps, i_stamps = self.ext.find_stamps(self._c_state, self.template_data, self.image_data, self.config.fitthresh, self.star_catalog)
 
         num_t_stamps = len(t_stamps)
         num_i_stamps = len(i_stamps)
@@ -316,9 +300,6 @@ class Hotpants:
         """
         Step 2: Performs initial kernel fits for both convolution directions and selects
         the best one based on the figure of merit.
-
-        NOTE: This function no longer creates noise images. It uses the ones
-        created in the __init__ function.
 
         Returns:
             Tuple[str, List[Dict[str, Any]]]: The chosen convolution direction ('t' or 'i')
@@ -349,8 +330,6 @@ class Hotpants:
     def iterative_fit_and_clip(self) -> Tuple[np.ndarray, List[Dict]]:
         """
         Step 3 & 4: Performs iterative clipping of stamps and computes the global kernel solution.
-        This method combines the iterative fitting and final solution calculation,
-        mirroring the behavior of the original `fitKernel` function in HOTPANTS.
 
         Returns:
             Tuple containing:
@@ -368,7 +347,7 @@ class Hotpants:
         else:
             conv_img, ref_img = self.image_data, self.template_data
 
-        kernel_solution, final_fits, stats = self.ext.fit_kernel(self._c_state, self.results["best_fits"], conv_img, ref_img, self.results["t_noise_sq"] + self.results["i_noise_sq"], self.results["input_mask"])
+        kernel_solution, final_fits, stats = self.ext.fit_kernel(self._c_state, self.results["best_fits"], conv_img, ref_img, self.results["t_noise_sq"] + self.results["i_noise_sq"])
 
         if len(final_fits) == 0:
             raise HotpantsError("All stamps were clipped during iterative fitting.")
@@ -397,7 +376,6 @@ class Hotpants:
 
         conv_direction = self.results["conv_direction"]
 
-        # Use the pre-calculated squared noise images
         t_noise_sq = self.results["t_noise_sq"]
         i_noise_sq = self.results["i_noise_sq"]
 
@@ -413,6 +391,7 @@ class Hotpants:
             target_noise_sq = t_noise_sq
 
         convolved_image, output_mask, conv_noise_sq = self.ext.apply_kernel(self._c_state, image_to_convolve, self.results["kernel_solution"], noise_to_convolve_sq)
+
         bkg = self.ext.get_background_image(self._c_state, self.results["kernel_solution"])
         convolved_image += bkg
 

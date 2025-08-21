@@ -197,12 +197,12 @@ static PyObject *py_make_input_mask(PyObject *self, PyObject *args)
     PyObject *t_mask_obj, *i_mask_obj;
     HotpantsStateObject *state_obj;
 
-    if (!PyArg_ParseTuple(args, "O!O!O!O!O!",
+    if (!PyArg_ParseTuple(args, "O!O!O!OO",
                           &HotpantsState_Type, &state_obj,
                           &PyArray_Type, &template_arr,
                           &PyArray_Type, &image_arr,
-                          &PyArray_Type, &t_mask_obj,
-                          &PyArray_Type, &i_mask_obj))
+                          &t_mask_obj,
+                          &i_mask_obj))
     {
         return NULL;
     }
@@ -272,6 +272,10 @@ static PyObject *py_make_input_mask(PyObject *self, PyObject *args)
         }
     }
 
+    // Copy the final mask into the persistent C-owned buffer
+    memcpy(state->mRData, mData, state->nx * state->ny * sizeof(int));
+
+    // Wrap the temporary buffer in a NumPy array to return to Python
     npy_intp dims[2] = {state->ny, state->nx};
     PyObject *mask_arr = PyArray_SimpleNewFromData(2, dims, NPY_INT32, mData);
     if (!mask_arr)
@@ -325,29 +329,25 @@ static PyObject *py_calculate_noise_image(PyObject *self, PyObject *args)
 
 static PyObject *py_find_stamps(PyObject *self, PyObject *args)
 {
-    PyArrayObject *template_arr, *image_arr, *input_mask_arr;
-    PyArrayObject *catalog_arr_obj;
+    PyArrayObject *template_arr, *image_arr;
+    PyObject *catalog_arr_obj;
     double fit_thresh;
     HotpantsStateObject *state_obj;
 
-    if (!PyArg_ParseTuple(args, "O!O!O!O!dO",
+    if (!PyArg_ParseTuple(args, "O!O!O!dO",
                           &HotpantsState_Type, &state_obj,
                           &PyArray_Type, &template_arr,
                           &PyArray_Type, &image_arr,
-                          &PyArray_Type, &input_mask_arr,
                           &fit_thresh,
-                          &PyArray_Type, &catalog_arr_obj))
+                          &catalog_arr_obj))
     {
         return NULL;
     }
-
     hotpants_state_t *state = state_obj->state;
-    state->mRData = (int *)PyArray_DATA(input_mask_arr);
     state->kerFitThresh = fit_thresh;
 
     int niS = 0, ntS = 0;
     int rXMin = 0, rYMin = 0, rXMax = state->nx - 1, rYMax = state->ny - 1;
-
     state->tStamps = (stamp_struct *)calloc(state->nStamps, sizeof(stamp_struct));
     if (allocateStamps(state, state->tStamps, state->nStamps))
     {
@@ -356,7 +356,6 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
         state->tStamps = NULL;
         return NULL;
     }
-
     state->iStamps = (stamp_struct *)calloc(state->nStamps, sizeof(stamp_struct));
     if (allocateStamps(state, state->iStamps, state->nStamps))
     {
@@ -368,16 +367,25 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
         state->iStamps = NULL;
         return NULL;
     }
-
-    if (catalog_arr_obj && PyArray_Check(catalog_arr_obj))
+    if (catalog_arr_obj && catalog_arr_obj != Py_None)
     {
         // Get the data pointer and dimensions from the NumPy array
         float *catalog_data = (float *)PyArray_DATA((PyArrayObject *)catalog_arr_obj);
         npy_intp *dims = PyArray_DIMS((PyArrayObject *)catalog_arr_obj);
         int num_catalog_entries = dims[0];
-
+        printf("Catalog provided with %d entries.\n", num_catalog_entries);
         for (int i = 0; i < num_catalog_entries; ++i)
         {
+            if (!(strncmp(state->forceConvolve_str, "i", 1) == 0))
+            {
+                state->tStamps[ntS].sscnt = state->tStamps[ntS].nss = 0;
+                state->tStamps[ntS].chi2 = 0.0;
+            }
+            if (!(strncmp(state->forceConvolve_str, "t", 1) == 0))
+            {
+                state->iStamps[niS].sscnt = state->iStamps[niS].nss = 0;
+                state->iStamps[niS].chi2 = 0.0;
+            }
             double x_pos = catalog_data[i * 2];     // Access x coordinate
             double y_pos = catalog_data[i * 2 + 1]; // Access y coordinate
             // Replicating main.c logic: use 0 for no automatic search
@@ -396,10 +404,10 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
                     niS += 1;
             }
         }
-        printf("Found %d catalog entries.\n", num_catalog_entries);
     }
     else
     {
+        printf("No catalog provided, performing automated grid search.\n");
         // Original logic for automated grid search
         for (int l = 0; l < state->nStampY; l++)
         {
@@ -440,7 +448,6 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
         }
     }
     printf("Found %d template stamps and %d image stamps.\n", ntS, niS);
-
     PyObject *t_stamps_list = PyList_New(0);
     if (!(strncmp(state->forceConvolve_str, "i", 1) == 0)) {
         for (int i = 0; i < ntS; ++i) {
@@ -456,7 +463,7 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
             PyList_Append(t_stamps_list, stamp_dict);
         }
     }
-
+    printf("Created template stamps list with size: %d\n", ntS);
     PyObject *i_stamps_list = PyList_New(0);
     if (!(strncmp(state->forceConvolve_str, "t", 1) == 0)) {
         for (int i = 0; i < niS; ++i) {
@@ -472,6 +479,15 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
             PyList_Append(i_stamps_list, stamp_dict);
         }
     }
+
+    // // Free temporary C arrays for stamps
+    // freeStampMem(state, state->tStamps, state->nStamps);
+    // free(state->tStamps);
+    // state->tStamps = NULL;
+
+    // freeStampMem(state, state->iStamps, state->nStamps);
+    // free(state->iStamps);
+    // state->iStamps = NULL;
 
     return Py_BuildValue("OO", t_stamps_list, i_stamps_list);
 }
@@ -489,8 +505,6 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
     }
     hotpants_state_t *state = state_obj->state;
 
-    // We assume the state is initialized, but some temporary arrays might be null
-    // Here we allocate only what's necessary for this function
     if (!state->kernel_vec)
     {
         state->kernel_vec = (double **)calloc(state->nCompKer, sizeof(double *));
@@ -520,17 +534,19 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
         all_stamps[i].nss = n_substamps;
         all_stamps[i].sscnt = 0;
 
-        for (int j = 0; j < n_substamps; j++) {
+        for (int j = 0; j < n_substamps; j++)
+        {
             PyObject *substamp_tuple = PyList_GetItem(substamps_list, j);
             all_stamps[i].xss[j] = (int)PyFloat_AsDouble(PyTuple_GetItem(substamp_tuple, 0));
             all_stamps[i].yss[j] = (int)PyFloat_AsDouble(PyTuple_GetItem(substamp_tuple, 1));
         }
-        
-        if (all_stamps[i].nss > 0) {
+
+        if (all_stamps[i].nss > 0)
+        {
             fillStamp(state, &all_stamps[i], (float *)PyArray_DATA(conv_arr), (float *)PyArray_DATA(ref_arr));
         }
     }
-    state->mRData = (int *)PyArray_DATA(noise_arr); // Dummy use for check_stamps to access mask
+
     double fom = check_stamps(state, all_stamps, state->nS, (float *)PyArray_DATA(ref_arr), (float *)PyArray_DATA(noise_arr));
 
     PyObject *result_list = PyList_New(0);
@@ -551,39 +567,30 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
         }
     }
 
+    // freeStampMem(state, all_stamps, state->nS);
+    // free(all_stamps);
     return Py_BuildValue("Od", result_list, fom);
 }
-/*
- * This function is a wrapper around the core HOTPANTS kernel fitting logic,
- * which is equivalent to the `fitKernel` function in the original C code.
- * It performs iterative sigma-clipping of substamps and then computes the
- * final global kernel solution.
- */
+
 static PyObject *py_fit_kernel(PyObject *self, PyObject *args)
 {
     PyObject *stamps_list;
-    PyArrayObject *conv_arr, *ref_arr, *noise_arr, *mask_arr;
+    PyArrayObject *conv_arr, *ref_arr, *noise_arr;
     HotpantsStateObject *state_obj;
 
-    // Parse Python arguments (no change here)
-    if (!PyArg_ParseTuple(args, "O!O!O!O!O!O!",
+    if (!PyArg_ParseTuple(args, "O!O!O!O!O!",
                           &HotpantsState_Type, &state_obj,
                           &PyList_Type, &stamps_list,
                           &PyArray_Type, &conv_arr,
                           &PyArray_Type, &ref_arr,
-                          &PyArray_Type, &noise_arr,
-                          &PyArray_Type, &mask_arr))
+                          &PyArray_Type, &noise_arr))
     {
         return NULL;
     }
     hotpants_state_t *state = state_obj->state;
 
-    // Set the mask data for the C functions that need it
-    state->mRData = (int *)PyArray_DATA(mask_arr);
-
-    // 1. Setup stamps from Python list
     int n_stamps = PyList_Size(stamps_list);
-    state->nS = n_stamps; // Set nS in state, as it's used by other functions
+    state->nS = n_stamps;
     stamp_struct *stamps = (stamp_struct *)calloc(n_stamps, sizeof(stamp_struct));
     if (!stamps || allocateStamps(state, stamps, n_stamps))
     {
@@ -601,20 +608,22 @@ static PyObject *py_fit_kernel(PyObject *self, PyObject *args)
         stamps[i].nss = n_substamps;
         stamps[i].sscnt = 0;
 
-        for (int j = 0; j < n_substamps; j++) {
+        for (int j = 0; j < n_substamps; j++)
+        {
             PyObject *substamp_tuple = PyList_GetItem(substamps_list, j);
             stamps[i].xss[j] = (int)PyFloat_AsDouble(PyTuple_GetItem(substamp_tuple, 0));
             stamps[i].yss[j] = (int)PyFloat_AsDouble(PyTuple_GetItem(substamp_tuple, 1));
         }
-        
-        if (stamps[i].nss > 0) {
+
+        if (stamps[i].nss > 0)
+        {
             fillStamp(state, &stamps[i], (float *)PyArray_DATA(conv_arr), (float *)PyArray_DATA(ref_arr));
         }
     }
 
-    // 2. Iterative fitting loop (adapted from original fitKernel)
     double *kernel_sol = (double *)calloc(state->nCompTotal + 1, sizeof(double));
-    if (!kernel_sol) {
+    if (!kernel_sol)
+    {
         freeStampMem(state, stamps, n_stamps);
         free(stamps);
         PyErr_SetString(PyExc_MemoryError, "Failed to allocate kernel_sol");
@@ -623,21 +632,19 @@ static PyObject *py_fit_kernel(PyObject *self, PyObject *args)
 
     double meansig_substamps = 0.0, scatter_substamps = 0.0;
     int n_skipped_substamps = 0;
-    
-    // Ensure kernel vectors are initialized before the loop
+
     getKernelVec(state);
 
     fitKernel(state, stamps, (float *)PyArray_DATA(ref_arr), (float *)PyArray_DATA(conv_arr),
               (float *)PyArray_DATA(noise_arr), kernel_sol,
               &meansig_substamps, &scatter_substamps, &n_skipped_substamps);
 
-    // 3. Prepare return values
     npy_intp dims[] = {state->nCompTotal + 1};
     double *kernel_sol_copy = (double *)malloc((state->nCompTotal + 1) * sizeof(double));
     memcpy(kernel_sol_copy, kernel_sol, (state->nCompTotal + 1) * sizeof(double));
     PyObject *global_coeffs_array = PyArray_SimpleNewFromData(1, dims, NPY_DOUBLE, kernel_sol_copy);
     PyArray_ENABLEFLAGS((PyArrayObject *)global_coeffs_array, NPY_ARRAY_OWNDATA);
-    
+
     PyObject *final_stamps_list = PyList_New(0);
     for (int i = 0; i < n_stamps; i++)
     {
@@ -656,36 +663,36 @@ static PyObject *py_fit_kernel(PyObject *self, PyObject *args)
     PyDict_SetItemString(stats_dict, "scatter", PyFloat_FromDouble(scatter_substamps));
     PyDict_SetItemString(stats_dict, "nskipped", PyLong_FromLong(n_skipped_substamps));
 
-    // // 4. Cleanup
     // freeStampMem(state, stamps, n_stamps);
     // free(stamps);
-    // free(kernel_sol); 
+    // free(kernel_sol);
 
     return Py_BuildValue("OOO", global_coeffs_array, final_stamps_list, stats_dict);
 }
 
 static PyObject *py_apply_kernel(PyObject *self, PyObject *args)
 {
-    PyArrayObject *image_arr, *kernel_solution_arr;
-    PyArrayObject *noise_sq_arr;
+    PyArrayObject *image_arr, *kernel_solution_arr, *noise_sq_arr;
     HotpantsStateObject *state_obj;
 
-    if (!PyArg_ParseTuple(args, "O!O!O!O!", &HotpantsState_Type, &state_obj, &PyArray_Type, &image_arr, &PyArray_Type, &kernel_solution_arr, &PyArray_Type, &noise_sq_arr))
+    if (!PyArg_ParseTuple(args, "O!O!O!O!",
+                          &HotpantsState_Type, &state_obj,
+                          &PyArray_Type, &image_arr,
+                          &PyArray_Type, &kernel_solution_arr,
+                          &PyArray_Type, &noise_sq_arr))
     {
         return NULL;
     }
     hotpants_state_t *state = state_obj->state;
 
-    // Allocate temp arrays for this function
+    // This is the OUTPUT mask buffer, allocated fresh.
     int *mRData_out = (int *)calloc(state->nx * state->ny, sizeof(int));
     if (!mRData_out)
     {
         PyErr_SetString(PyExc_MemoryError, "Failed to allocate mask");
         return NULL;
     }
-    
-    // Use the state's pre-allocated buffers, don't re-allocate them.
-    // The main deallocator will handle freeing them.
+
     getKernelVec(state);
 
     double *kernel_sol = (double *)PyArray_DATA(kernel_solution_arr);
@@ -697,12 +704,10 @@ static PyObject *py_apply_kernel(PyObject *self, PyObject *args)
         return NULL;
     }
 
-    // ========================================================================
-    // START FIX: Correctly handle memory for the noise/variance image
-    // ========================================================================
     long num_pixels = state->nx * state->ny;
     float *noise_sq_data_c_copy = (float *)malloc(num_pixels * sizeof(float));
-    if (!noise_sq_data_c_copy) {
+    if (!noise_sq_data_c_copy)
+    {
         free(conv_image);
         free(mRData_out);
         PyErr_SetString(PyExc_MemoryError, "Failed to allocate C-copy of noise data");
@@ -710,17 +715,17 @@ static PyObject *py_apply_kernel(PyObject *self, PyObject *args)
     }
     memcpy(noise_sq_data_c_copy, (float *)PyArray_DATA(noise_sq_arr), num_pixels * sizeof(float));
 
-    // Set the state's mRData to our output buffer for this operation
+    // Since spatial_convolve writes to state->mRData, we must:
+    // 1. Save the original pointer to the persistent C mask buffer.
+    // 2. Point state->mRData to our new, temporary output buffer.
+    // 3. Pass the persistent C mask buffer as the input mask.
+    // 4. Restore the original pointer.
+    int *original_mRData_ptr = state->mRData;
     state->mRData = mRData_out;
 
-    spatial_convolve(state, (float *)PyArray_DATA(image_arr), &noise_sq_data_c_copy, state->nx, state->ny, kernel_sol, conv_image, state->mRData);
-    
-    // Unset the state's mRData pointer so it doesn't point to local memory anymore
-    state->mRData = NULL;
-    // ========================================================================
-    // END FIX
-    // ========================================================================
+    spatial_convolve(state, (float *)PyArray_DATA(image_arr), &noise_sq_data_c_copy, state->nx, state->ny, kernel_sol, conv_image, original_mRData_ptr);
 
+    state->mRData = original_mRData_ptr;
 
     npy_intp dims[] = {state->ny, state->nx};
     PyObject *conv_arr = PyArray_SimpleNewFromData(2, dims, NPY_FLOAT32, conv_image);
@@ -728,7 +733,7 @@ static PyObject *py_apply_kernel(PyObject *self, PyObject *args)
     {
         free(conv_image);
         free(mRData_out);
-        free(noise_sq_data_c_copy); // Clean up on error
+        free(noise_sq_data_c_copy);
         PyErr_SetString(PyExc_MemoryError, "Failed to create conv_arr");
         return NULL;
     }
@@ -737,18 +742,17 @@ static PyObject *py_apply_kernel(PyObject *self, PyObject *args)
     {
         free(conv_image);
         free(mRData_out);
-        free(noise_sq_data_c_copy); // Clean up on error
+        free(noise_sq_data_c_copy);
         PyErr_SetString(PyExc_MemoryError, "Failed to create mask_arr");
         return NULL;
     }
 
-    // Create an object for the convolved noise image from the C-managed buffer.
     PyObject *conv_noise_sq_arr = PyArray_SimpleNewFromData(2, dims, NPY_FLOAT32, noise_sq_data_c_copy);
     if (!conv_noise_sq_arr)
     {
         free(conv_image);
         free(mRData_out);
-        free(noise_sq_data_c_copy); // Clean up on error
+        free(noise_sq_data_c_copy);
         PyErr_SetString(PyExc_MemoryError, "Failed to create conv_noise_sq_arr");
         return NULL;
     }
@@ -757,8 +761,6 @@ static PyObject *py_apply_kernel(PyObject *self, PyObject *args)
     Py_INCREF(mask_arr);
     Py_INCREF(conv_noise_sq_arr);
 
-    // Transfer ownership of all C-allocated buffers to their respective NumPy arrays.
-    // NumPy will now be responsible for calling `free()` when the arrays are garbage collected.
     PyArray_ENABLEFLAGS((PyArrayObject *)conv_arr, NPY_ARRAY_OWNDATA);
     PyArray_ENABLEFLAGS((PyArrayObject *)mask_arr, NPY_ARRAY_OWNDATA);
     PyArray_ENABLEFLAGS((PyArrayObject *)conv_noise_sq_arr, NPY_ARRAY_OWNDATA);
@@ -1038,6 +1040,8 @@ static void init_hotpants_state(hotpants_state_t *state, int nx, int ny, const h
     state->nCompTotal = config->n_comp_total;
     state->nC = state->nCompKer + state->nBGVectors + 1;
     state->kcStep = state->fwKernel;
+
+    state->mRData = (int *)calloc(state->nx * state->ny, sizeof(int));
 
     // Allocate memory for filters, kernels, and temporary arrays as in main.c
     state->temp = (float *)calloc((state->fwKSStamp + state->fwKernel) * state->fwKSStamp, sizeof(float));
