@@ -367,7 +367,7 @@ void fitKernel(hotpants_state_t *state, stamp_struct *stamps, float *imRef, floa
         free(state->wxy[i]);
     free(matrix);
     free(state->wxy);
-    
+    state->wxy = NULL; 
     return;
 }
 

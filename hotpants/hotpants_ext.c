@@ -45,8 +45,9 @@ typedef struct
 } HotpantsStateObject;
 
 static PyObject *hotpants_state_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
-static void hotpants_state_dealloc(HotpantsStateObject *self);
 static PyObject *hotpants_state_init_from_config(PyObject *self, PyObject *args);
+static void free_hotpants_state(HotpantsStateObject *self);
+static int parse_config_dict(PyObject *config_dict, hotpants_config_t *config);
 
 static PyMethodDef hotpants_state_methods[] = {
     {NULL} /* Sentinel */
@@ -56,137 +57,11 @@ static PyTypeObject HotpantsState_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
         .tp_name = "hotpants_ext.HotpantsState", // Add this line
     .tp_basicsize = sizeof(HotpantsStateObject),
-    .tp_dealloc = (destructor)hotpants_state_dealloc,
+    .tp_dealloc = (destructor)free_hotpants_state,
     .tp_new = hotpants_state_new,
     .tp_init = (initproc)hotpants_state_init_from_config,
     .tp_methods = hotpants_state_methods,
 };
-
-// Function prototypes
-static int parse_config_dict(PyObject *config_dict, hotpants_config_t *config);
-static void init_hotpants_state(hotpants_state_t *state, int nx, int ny, const hotpants_config_t *config);
-static void free_hotpants_state(HotpantsStateObject *self);
-void allocateStampMem(hotpants_state_t *state, stamp_struct *stamps, int n);
-void freeStampMem(hotpants_state_t *state, stamp_struct *stamps, int n);
-
-static PyObject *hotpants_state_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
-{
-    HotpantsStateObject *self;
-    self = (HotpantsStateObject *)type->tp_alloc(type, 0);
-    if (self != NULL)
-    {
-        self->state = (hotpants_state_t *)malloc(sizeof(hotpants_state_t));
-        if (self->state == NULL)
-        {
-            Py_DECREF(self);
-            PyErr_SetString(PyExc_MemoryError, "Failed to allocate hotpants_state_t");
-            return NULL;
-        }
-        memset(self->state, 0, sizeof(hotpants_state_t));
-    }
-    return (PyObject *)self;
-}
-
-static void hotpants_state_dealloc(HotpantsStateObject *self)
-{
-    if (self->state)
-    {
-        // Free all memory owned by the C state object
-        if (self->state->mRData)
-            free(self->state->mRData);
-        if (self->state->temp)
-            free(self->state->temp);
-        if (self->state->temp2)
-            free(self->state->temp2);
-        if (self->state->indx)
-            free(self->state->indx);
-        if (self->state->kernel)
-            free(self->state->kernel);
-        if (self->state->kernel_coeffs)
-            free(self->state->kernel_coeffs);
-        if (self->state->kernel_vec)
-        {
-            for (int i = 0; i < self->state->nCompKer; ++i)
-                if (self->state->kernel_vec[i])
-                    free(self->state->kernel_vec[i]);
-            free(self->state->kernel_vec);
-        }
-        if (self->state->filter_x)
-            free(self->state->filter_x);
-        if (self->state->filter_y)
-            free(self->state->filter_y);
-        if (self->state->check_mat)
-        {
-            for (int i = 0; i < self->state->nC; ++i)
-                if (self->state->check_mat[i])
-                    free(self->state->check_mat[i]);
-            free(self->state->check_mat);
-        }
-        if (self->state->check_vec)
-            free(self->state->check_vec);
-        if (self->state->check_stack)
-            free(self->state->check_stack);
-        if (self->state->wxy)
-        {
-            for (int i = 0; i < self->state->nStamps; ++i)
-                if (self->state->wxy[i])
-                    free(self->state->wxy[i]);
-            free(self->state->wxy);
-        }
-        if (self->state->PCA)
-        {
-            for (int i = 0; i < self->state->ngauss; ++i)
-                if (self->state->PCA[i])
-                    free(self->state->PCA[i]);
-            free(self->state->PCA);
-        }
-        if (self->state->tStamps)
-        {
-            freeStampMem(self->state, self->state->tStamps, self->state->nStamps);
-            free(self->state->tStamps);
-        }
-        if (self->state->iStamps)
-        {
-            freeStampMem(self->state, self->state->iStamps, self->state->nStamps);
-            free(self->state->iStamps);
-        }
-        if (self->state->deg_fixe)
-            free(self->state->deg_fixe);
-        if (self->state->sigma_gauss)
-            free(self->state->sigma_gauss);
-
-        free(self->state);
-    }
-    Py_TYPE(self)->tp_free((PyObject *)self);
-}
-
-// Function to initialize the state object from a Python dict
-static PyObject *hotpants_state_init_from_config(PyObject *self, PyObject *args)
-{
-    PyObject *config_dict_obj;
-    int nx, ny;
-    if (!PyArg_ParseTuple(args, "iiO!", &nx, &ny, &PyDict_Type, &config_dict_obj))
-    {
-        return NULL;
-    }
-
-    HotpantsStateObject *state_obj = (HotpantsStateObject *)self;
-    if (!state_obj || !state_obj->state)
-    {
-        PyErr_SetString(PyExc_RuntimeError, "Invalid state object.");
-        return NULL;
-    }
-
-    hotpants_config_t config;
-    if (parse_config_dict(config_dict_obj, &config) < 0)
-    {
-        return NULL;
-    }
-
-    // Allocate and initialize the C state
-    init_hotpants_state(state_obj->state, nx, ny, &config);
-    Py_RETURN_NONE;
-}
 
 /*****************************************************
  * Python function wrappers
@@ -567,8 +442,8 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
         }
     }
 
-    // freeStampMem(state, all_stamps, state->nS);
-    // free(all_stamps);
+    freeStampMem(state, all_stamps, state->nS);
+    free(all_stamps);
     return Py_BuildValue("Od", result_list, fom);
 }
 
@@ -663,9 +538,9 @@ static PyObject *py_fit_kernel(PyObject *self, PyObject *args)
     PyDict_SetItemString(stats_dict, "scatter", PyFloat_FromDouble(scatter_substamps));
     PyDict_SetItemString(stats_dict, "nskipped", PyLong_FromLong(n_skipped_substamps));
 
-    // freeStampMem(state, stamps, n_stamps);
-    // free(stamps);
-    // free(kernel_sol);
+    freeStampMem(state, stamps, n_stamps);
+    free(stamps);
+    free(kernel_sol);
 
     return Py_BuildValue("OOO", global_coeffs_array, final_stamps_list, stats_dict);
 }
@@ -982,54 +857,94 @@ static int parse_config_dict(PyObject *config_dict, hotpants_config_t *config)
     return 0;
 }
 
-static void init_hotpants_state(hotpants_state_t *state, int nx, int ny, const hotpants_config_t *config)
+static PyObject *hotpants_state_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
+    HotpantsStateObject *self;
+    self = (HotpantsStateObject *)type->tp_alloc(type, 0);
+    if (self != NULL)
+    {
+        self->state = (hotpants_state_t *)malloc(sizeof(hotpants_state_t));
+        if (self->state == NULL)
+        {
+            Py_DECREF(self);
+            PyErr_SetString(PyExc_MemoryError, "Failed to allocate hotpants_state_t");
+            return NULL;
+        }
+        memset(self->state, 0, sizeof(hotpants_state_t));
+    }
+    return (PyObject *)self;
+}
+
+static PyObject *hotpants_state_init_from_config(PyObject *self, PyObject *args)
+{
+    PyObject *config_dict_obj;
+    int nx, ny;
+    if (!PyArg_ParseTuple(args, "iiO!", &nx, &ny, &PyDict_Type, &config_dict_obj))
+    {
+        return NULL;
+    }
+
+    HotpantsStateObject *state_obj = (HotpantsStateObject *)self;
+    if (!state_obj || !state_obj->state)
+    {
+        PyErr_SetString(PyExc_RuntimeError, "Invalid state object.");
+        return NULL;
+    }
+
+    hotpants_config_t config;
+    if (parse_config_dict(config_dict_obj, &config) < 0)
+    {
+        return NULL;
+    }
+
+    hotpants_state_t *state = state_obj->state;
+
     memset(state, 0, sizeof(hotpants_state_t));
     state->nx = nx;
     state->ny = ny;
     state->rPixX = nx;
     state->rPixY = ny;
-    state->tUThresh = config->tuthresh;
-    state->tLThresh = config->tlthresh;
-    state->tUKThresh = config->tuktresh;
-    state->tGain = config->tgain;
-    state->tRdnoise = config->trdnoise;
-    state->tPedestal = config->tpedestal;
-    state->iUThresh = config->iuthresh;
-    state->iLThresh = config->ilthresh;
-    state->iUKThresh = config->iuktresh;
-    state->iGain = config->igain;
-    state->iRdnoise = config->irdnoise;
-    state->iPedestal = config->ipedestal;
-    state->hwKernel = config->rkernel;
-    state->kerOrder = config->ko;
-    state->bgOrder = config->bgo;
-    state->kerFitThresh = config->fitthresh;
-    state->kerSigReject = config->ks;
-    state->kerFracMask = config->kfm;
-    state->nKSStamps = config->nss;
-    state->hwKSStamp = config->rss;
-    state->nRegX = config->nregx;
-    state->nRegY = config->nregy;
-    state->nStampX = config->nstampx;
-    state->nStampY = config->nstampy;
-    strncpy(state->forceConvolve_str, config->force_convolve, 2);
-    strncpy(state->photNormalize_str, config->normalize, 2);
-    strncpy(state->figMerit_str, config->fom, 2);
-    state->fillVal = config->fillval;
-    state->fillValNoise = config->fillval_noise;
-    state->verbose = config->verbose;
-    state->rescaleOK = config->rescale_ok;
-    state->convolveVariance = config->conv_var;
-    state->usePCA = config->use_pca;
-    state->statSig = config->stat_sig;
-    state->kfSpreadMask1 = config->kf_spread_mask1;
-    state->ngauss = config->ngauss;
+    state->tUThresh = config.tuthresh;
+    state->tLThresh = config.tlthresh;
+    state->tUKThresh = config.tuktresh;
+    state->tGain = config.tgain;
+    state->tRdnoise = config.trdnoise;
+    state->tPedestal = config.tpedestal;
+    state->iUThresh = config.iuthresh;
+    state->iLThresh = config.ilthresh;
+    state->iUKThresh = config.iuktresh;
+    state->iGain = config.igain;
+    state->iRdnoise = config.irdnoise;
+    state->iPedestal = config.ipedestal;
+    state->hwKernel = config.rkernel;
+    state->kerOrder = config.ko;
+    state->bgOrder = config.bgo;
+    state->kerFitThresh = config.fitthresh;
+    state->kerSigReject = config.ks;
+    state->kerFracMask = config.kfm;
+    state->nKSStamps = config.nss;
+    state->hwKSStamp = config.rss;
+    state->nRegX = config.nregx;
+    state->nRegY = config.nregy;
+    state->nStampX = config.nstampx;
+    state->nStampY = config.nstampy;
+    strncpy(state->forceConvolve_str, config.force_convolve, 2);
+    strncpy(state->photNormalize_str, config.normalize, 2);
+    strncpy(state->figMerit_str, config.fom, 2);
+    state->fillVal = config.fillval;
+    state->fillValNoise = config.fillval_noise;
+    state->verbose = config.verbose;
+    state->rescaleOK = config.rescale_ok;
+    state->convolveVariance = config.conv_var;
+    state->usePCA = config.use_pca;
+    state->statSig = config.stat_sig;
+    state->kfSpreadMask1 = config.kf_spread_mask1;
+    state->ngauss = config.ngauss;
     state->deg_fixe = (int *)malloc(state->ngauss * sizeof(int));
-    memcpy(state->deg_fixe, config->deg_fixe, state->ngauss * sizeof(int));
+    memcpy(state->deg_fixe, config.deg_fixe, state->ngauss * sizeof(int));
     state->sigma_gauss = (float *)malloc(state->ngauss * sizeof(float));
-    memcpy(state->sigma_gauss, config->sigma_gauss, state->ngauss * sizeof(float));
-    state->fwKernel = config->fwkernel;
+    memcpy(state->sigma_gauss, config.sigma_gauss, state->ngauss * sizeof(float));
+    state->fwKernel = config.fwkernel;
 
     state->fwStamp = imin(state->nx / state->nRegX / state->nStampX,
                           state->ny / state->nRegY / state->nStampY);
@@ -1037,12 +952,12 @@ static void init_hotpants_state(hotpants_state_t *state, int nx, int ny, const h
     state->fwStamp -= state->fwStamp % 2 == 0 ? 1 : 0; /* hmmm, an odd shape... */
 
     // state->hwStamp = state->hwKernel;
-    state->fwKSStamp = config->fwksstamp;
+    state->fwKSStamp = config.fwksstamp;
     state->nStamps = state->nStampX * state->nStampY;
-    state->nCompKer = config->ncomp_ker;
-    state->nComp = config->ncomp;
-    state->nBGVectors = config->n_bg_vectors;
-    state->nCompTotal = config->n_comp_total;
+    state->nCompKer = config.ncomp_ker;
+    state->nComp = config.ncomp;
+    state->nBGVectors = config.n_bg_vectors;
+    state->nCompTotal = config.n_comp_total;
     state->nC = state->nCompKer + state->nBGVectors + 1;
     state->kcStep = state->fwKernel;
 
@@ -1073,6 +988,8 @@ static void init_hotpants_state(hotpants_state_t *state, int nx, int ny, const h
             state->PCA[i] = (double *)calloc(state->fwKernel * state->fwKernel, sizeof(double));
         }
     }
+
+    Py_RETURN_NONE;
 }
 
 static void free_hotpants_state(HotpantsStateObject *self)
@@ -1143,7 +1060,6 @@ static void free_hotpants_state(HotpantsStateObject *self)
             free(state->deg_fixe);
         if (state->sigma_gauss)
             free(state->sigma_gauss);
-
         free(state);
     }
     Py_TYPE(self)->tp_free((PyObject *)self);
@@ -1169,7 +1085,7 @@ PyMODINIT_FUNC PyInit_hotpants_ext(void)
 
     // Finalize the type object
     HotpantsState_Type.tp_new = hotpants_state_new;
-    HotpantsState_Type.tp_dealloc = (destructor)hotpants_state_dealloc;
+    HotpantsState_Type.tp_dealloc = (destructor)free_hotpants_state;
     HotpantsState_Type.tp_init = (initproc)hotpants_state_init_from_config;
     if (PyType_Ready(&HotpantsState_Type) < 0)
     {
