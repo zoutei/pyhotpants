@@ -11,6 +11,8 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum, auto
 
+from . import functions as pyhotpants
+
 # C extension will be imported dynamically
 hotpants_ext = None
 
@@ -483,6 +485,9 @@ class Hotpants:
             final_noise = self.ext.rescale_noise_ok(self._c_state, diff_image, final_noise, output_mask)
 
         self.results.update({"convolved_image": convolved_image, "output_mask": output_mask, "diff_image": diff_image, "noise_image": final_noise})
+
+        self._populate_global_convolved_models()
+
         return diff_image, convolved_image, final_noise, output_mask
 
     def get_final_outputs(self) -> Dict[str, Any]:
@@ -522,6 +527,39 @@ class Hotpants:
         self.convolve_and_difference()
         return self.get_final_outputs()
 
+    def visualize_kernel(self, at_coords: Tuple[int, int], size_factor: float = 2.0) -> np.ndarray:
+        """
+        Generates an image of the convolution kernel at a specific coordinate.
+
+        This method should be called *after* the pipeline has been run and a
+        kernel solution has been found. It uses the final kernel solution to
+        reconstruct the kernel for the given (x, y) location.
+
+        Args:
+            at_coords (Tuple[int, int]): The (x, y) coordinates at which to visualize the kernel.
+            size_factor (float, optional): A multiplier for the kernel's width to
+                determine the output image size. Defaults to 2.0.
+
+        Returns:
+            np.ndarray: A 2D NumPy array containing the image of the kernel.
+
+        Raises:
+            HotpantsError: If the kernel fitting has not been run yet.
+            TypeError: If at_coords is not a tuple of two integers.
+            ValueError: If size_factor is not a positive number.
+        """
+        if "kernel_solution" not in self.results:
+            raise HotpantsError("Kernel solution not found. The fitting pipeline must be run before a kernel can be visualized.")
+
+        if not (isinstance(at_coords, tuple) and len(at_coords) == 2 and all(isinstance(i, int) for i in at_coords)):
+            raise TypeError("at_coords must be a tuple of two integers (x, y).")
+
+        if not isinstance(size_factor, (int, float)) or size_factor <= 0:
+            raise ValueError("size_factor must be a positive number.")
+
+        kernel_image = self.ext.visualize_kernel(self._c_state, at_coords, self.results["kernel_solution"], size_factor)
+        return kernel_image
+
     def get_substamp_details(self) -> Dict[str, Any]:
         """
         Returns the complete, stateful master lists of all substamps and a
@@ -533,3 +571,34 @@ class Hotpants:
         final_fit_locations = [{"id": s.id, "x": s.x, "y": s.y} for s in self.template_substamps + self.image_substamps if s.status == SubstampStatus.USED_IN_FINAL_FIT]
 
         return {"template_substamps": self.template_substamps, "image_substamps": self.image_substamps, "final_fit_locations": {"convolution_direction": self.results["conv_direction"], "locations": final_fit_locations}}
+
+    def _populate_global_convolved_models(self):
+        """
+        Internal helper to extract cutouts from the final globally convolved image
+        and store them in the appropriate substamp objects. This is run after the
+        main convolution step.
+        """
+        if "convolved_image" not in self.results:
+            return
+
+        convolved_image = self.results["convolved_image"]
+        conv_dir = self.results["conv_direction"]
+
+        substamps_to_process = []
+        if conv_dir == "t":
+            substamps_to_process = self.template_substamps
+        elif conv_dir == "i":
+            substamps_to_process = self.image_substamps
+
+        if not substamps_to_process:
+            return
+
+        hw = self.config.hwksstamp
+        fill_value = self.config.fillval
+
+        for substamp in substamps_to_process:
+            x_center = int(round(substamp.x))
+            y_center = int(round(substamp.y))
+
+            cutout = pyhotpants.cut_substamp_from_image(image=convolved_image, x_center=x_center, y_center=y_center, half_width=hw, fill_value=fill_value)
+            substamp.convolved_model_global = cutout
