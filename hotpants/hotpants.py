@@ -11,6 +11,8 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum, auto
 
+from . import functions as pyhotpants
+
 # C extension will be imported dynamically
 hotpants_ext = None
 
@@ -483,6 +485,9 @@ class Hotpants:
             final_noise = self.ext.rescale_noise_ok(self._c_state, diff_image, final_noise, output_mask)
 
         self.results.update({"convolved_image": convolved_image, "output_mask": output_mask, "diff_image": diff_image, "noise_image": final_noise})
+
+        self._populate_global_convolved_models()
+
         return diff_image, convolved_image, final_noise, output_mask
 
     def get_final_outputs(self) -> Dict[str, Any]:
@@ -566,3 +571,34 @@ class Hotpants:
         final_fit_locations = [{"id": s.id, "x": s.x, "y": s.y} for s in self.template_substamps + self.image_substamps if s.status == SubstampStatus.USED_IN_FINAL_FIT]
 
         return {"template_substamps": self.template_substamps, "image_substamps": self.image_substamps, "final_fit_locations": {"convolution_direction": self.results["conv_direction"], "locations": final_fit_locations}}
+
+    def _populate_global_convolved_models(self):
+        """
+        Internal helper to extract cutouts from the final globally convolved image
+        and store them in the appropriate substamp objects. This is run after the
+        main convolution step.
+        """
+        if "convolved_image" not in self.results:
+            return
+
+        convolved_image = self.results["convolved_image"]
+        conv_dir = self.results["conv_direction"]
+
+        substamps_to_process = []
+        if conv_dir == "t":
+            substamps_to_process = self.template_substamps
+        elif conv_dir == "i":
+            substamps_to_process = self.image_substamps
+
+        if not substamps_to_process:
+            return
+
+        hw = self.config.hwksstamp
+        fill_value = self.config.fillval
+
+        for substamp in substamps_to_process:
+            x_center = int(round(substamp.x))
+            y_center = int(round(substamp.y))
+
+            cutout = pyhotpants.cut_substamp_from_image(image=convolved_image, x_center=x_center, y_center=y_center, half_width=hw, fill_value=fill_value)
+            substamp.convolved_model_global = cutout
