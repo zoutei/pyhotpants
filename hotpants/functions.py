@@ -114,7 +114,7 @@ def process_all_substamps_numba(image: np.ndarray, x_coords: np.ndarray, y_coord
 
     # Numba requires a typed list to store arrays.
     full_width = 2 * half_width + 1
-    all_cutouts = np.zeros((num_substamps, full_width, full_width), dtype=image.dtype)
+    all_cutouts = np.full((num_substamps, full_width, full_width), fill_value, dtype=image.dtype)
 
     for i in range(num_substamps):
         x_center = int(round(x_coords[i]))
