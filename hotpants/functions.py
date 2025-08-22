@@ -7,6 +7,7 @@ import numpy as np
 from numba import njit, typed
 
 
+@njit(cache=True)
 def cut_substamp_from_image(image: np.ndarray, x_center: int, y_center: int, half_width: int, fill_value: float = np.nan) -> np.ndarray:
     """
     Extracts a square substamp from a larger image, equivalent to the C 'cutSStamp' logic.
@@ -37,10 +38,10 @@ def cut_substamp_from_image(image: np.ndarray, x_center: int, y_center: int, hal
     x_end = x_center + half_width + 1
 
     # 2. Clip these boundaries to the actual dimensions of the source image
-    y_start_clipped = max(0, y_start)
-    y_end_clipped = min(ny, y_end)
-    x_start_clipped = max(0, x_start)
-    x_end_clipped = min(nx, x_end)
+    y_start_clipped = np.maximum(0, y_start)
+    y_end_clipped = np.minimum(ny, y_end)
+    x_start_clipped = np.maximum(0, x_start)
+    x_end_clipped = np.minimum(nx, x_end)
 
     # 3. Extract the valid (partial) cutout from the source image
     partial_cutout = image[y_start_clipped:y_end_clipped, x_start_clipped:x_end_clipped]
@@ -114,13 +115,13 @@ def process_all_substamps_numba(image: np.ndarray, x_coords: np.ndarray, y_coord
 
     # Numba requires a typed list to store arrays.
     full_width = 2 * half_width + 1
-    all_cutouts = np.full((num_substamps, full_width, full_width), fill_value, dtype=image.dtype)
+    all_cutouts = np.zeros((num_substamps, full_width, full_width), dtype=image.dtype)
 
     for i in range(num_substamps):
         x_center = int(round(x_coords[i]))
         y_center = int(round(y_coords[i]))
 
         # Call the core helper to populate this single cutout
-        all_cutouts[i] = cut_substamp_from_image(image, x_center, y_center, half_width, fill_value)
+        all_cutouts[i] = cut_substamp_from_image(image, x_center, y_center, half_width)
 
     return all_cutouts
