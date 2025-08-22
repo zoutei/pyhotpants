@@ -121,6 +121,6 @@ def process_all_substamps_numba(image: np.ndarray, x_coords: np.ndarray, y_coord
         y_center = int(round(y_coords[i]))
 
         # Call the core helper to populate this single cutout
-        all_cutouts[i] = cut_substamp_from_image(image, x_center, y_center, half_width)
+        all_cutouts[i] = cut_substamp_from_image(image, x_center, y_center, half_width, fill_value)
 
     return all_cutouts
