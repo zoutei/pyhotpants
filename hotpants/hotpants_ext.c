@@ -7,6 +7,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <time.h>
+#include <unistd.h>
 #include <assert.h>
 
 // Include the original hotpants headers
@@ -423,6 +424,9 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
 
     PyObject *fit_results_list = PyList_New(0);
     npy_intp cutout_dims[] = {state->fwKSStamp, state->fwKSStamp};
+    int n_basis_vectors = state->nCompKer + state->nBGVectors;
+    npy_intp basis_dims[] = {n_basis_vectors, state->fwKSStamp, state->fwKSStamp};
+    npy_intp local_sol_dims[] = {state->nCompKer + 1};
 
     // --- Data Extraction Stage ---
     // Loop through every substamp individually to extract its data
@@ -482,6 +486,17 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
         PyDict_SetItemString(result_dict, "template_cutout", (strcmp(conv_dir, "t") == 0) ? conv_cutout_arr : ref_cutout_arr);
         PyDict_SetItemString(result_dict, "noise_cutout", noise_cutout_arr);
 
+        double *basis_vectors_data = (double *)malloc(n_basis_vectors * state->fwKSStamp * state->fwKSStamp * sizeof(double));
+        for (int v = 0; v < n_basis_vectors; v++)
+        {
+            memcpy(basis_vectors_data + v * state->fwKSStamp * state->fwKSStamp,
+                   all_stamps[group_id].vectors[v],
+                   state->fwKSStamp * state->fwKSStamp * sizeof(double));
+        }
+        PyObject *basis_vectors_arr = PyArray_SimpleNewFromData(3, basis_dims, NPY_DOUBLE, basis_vectors_data);
+        PyArray_ENABLEFLAGS((PyArrayObject *)basis_vectors_arr, NPY_ARRAY_OWNDATA);
+        PyDict_SetItemString(result_dict, "basis_vectors", basis_vectors_arr);
+
         PyList_Append(fit_results_list, result_dict);
     }
 
@@ -498,6 +513,12 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
         PyDict_SetItemString(result_dict, "fom", PyFloat_FromDouble(all_stamps[group_id].diff));
         PyDict_SetItemString(result_dict, "chi2", PyFloat_FromDouble(all_stamps[group_id].chi2));
         PyDict_SetItemString(result_dict, "survived_check", (all_stamps[group_id].diff < state->kerSigReject) ? Py_True : Py_False);
+
+        double *local_sol_data = (double *)malloc((state->nCompKer + 1) * sizeof(double));
+        memcpy(local_sol_data, state->check_vec, (state->nCompKer + 1) * sizeof(double));
+        PyObject *local_sol_arr = PyArray_SimpleNewFromData(1, local_sol_dims, NPY_DOUBLE, local_sol_data);
+        PyArray_ENABLEFLAGS((PyArrayObject *)local_sol_arr, NPY_ARRAY_OWNDATA);
+        PyDict_SetItemString(result_dict, "local_solution", local_sol_arr);
     }
 
     freeStampMem(state, all_stamps, n_stamps);

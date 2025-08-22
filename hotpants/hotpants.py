@@ -29,7 +29,7 @@ def _get_ext():
     return hotpants_ext
 
 
-__version__ = "0.1.0"
+__version__ = "1.1.0"
 
 
 class HotpantsError(Exception):
@@ -62,6 +62,10 @@ class Substamp:
         self.template_cutout: Optional[np.ndarray] = None
         self.noise_variance_cutout: Optional[np.ndarray] = None
         self.fit_results: Dict[str, Dict[str, float]] = {}
+        self.basis_vectors: Optional[np.ndarray] = None
+        self.local_solution: Optional[np.ndarray] = None
+        self.convolved_model_local: Optional[np.ndarray] = None
+        self.convolved_model_global: Optional[np.ndarray] = None
 
     def __repr__(self) -> str:
         return f"Substamp(id={self.id}, group={self.stamp_group_id}, coords=({self.x:.2f}, {self.y:.2f}), status={self.status.name})"
@@ -349,6 +353,8 @@ class Hotpants:
                 substamp.template_cutout = result["template_cutout"]
                 substamp.noise_variance_cutout = result["noise_cutout"]
                 substamp.fit_results["t"] = {"fom": result["fom"], "chi2": result["chi2"]}
+                substamp.basis_vectors = result["basis_vectors"]
+                substamp.local_solution = result["local_solution"]
 
         # Fit image-derived substamps
         if self.image_substamps:
@@ -359,6 +365,8 @@ class Hotpants:
                 substamp.template_cutout = result["template_cutout"]
                 substamp.noise_variance_cutout = result["noise_cutout"]
                 substamp.fit_results["i"] = {"fom": result["fom"], "chi2": result["chi2"]}
+                substamp.basis_vectors = result["basis_vectors"]
+                substamp.local_solution = result["local_solution"]
 
         # Select best direction
         conv_direction = self.config.force_convolve
