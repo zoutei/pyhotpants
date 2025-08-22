@@ -48,6 +48,12 @@ static PyObject *hotpants_state_new(PyTypeObject *type, PyObject *args, PyObject
 static PyObject *hotpants_state_init_from_config(PyObject *self, PyObject *args);
 static void free_hotpants_state(HotpantsStateObject *self);
 static int parse_config_dict(PyObject *config_dict, hotpants_config_t *config);
+static PyObject *py_visualize_kernel(PyObject *self, PyObject *args);
+
+/*****************************************************
+ * NEW: State-Safe Convolution Wrapper
+ *****************************************************/
+static int safe_spatial_convolve(hotpants_state_t *state, float *image, float **variance, int xSize, int ySize, double *kernelSol, float *cRdata, int *cMask);
 
 static PyMethodDef hotpants_state_methods[] = {
     {NULL} /* Sentinel */
@@ -1150,6 +1156,7 @@ static PyMethodDef hotpants_ext_methods[] = {
     {"get_background_image", py_get_background_image, METH_VARARGS, "Calculates the background image from the kernel solution."},
     {"rescale_noise_ok", py_rescale_noise_ok, METH_VARARGS, "Rescales noise for 'OK' pixels to match empirical noise ratio."},
     {"calculate_final_stats", py_calculate_final_stats, METH_VARARGS, "Calculates final statistics on the difference image."},
+    {"visualize_kernel", py_visualize_kernel, METH_VARARGS, "Reconstructs and returns an image of the kernel at a specific coordinate."},
     {NULL, NULL, 0, NULL}};
 static struct PyModuleDef hotpants_ext_module = {
     PyModuleDef_HEAD_INIT, "hotpants_ext", "HOTPanTS C extension for image differencing", -1, hotpants_ext_methods};
@@ -1185,4 +1192,152 @@ PyMODINIT_FUNC PyInit_hotpants_ext(void)
     import_array();
 
     return module;
+}
+
+
+/**
+ * @brief A state-safe wrapper for the spatial_convolve function.
+ *
+ * This function creates a temporary "sandbox" for the state variables that are
+ * modified by spatial_convolve and its sub-routines (make_kernel). It allocates
+ * temporary buffers, swaps the state pointers, calls the original function,
+ * restores the state pointers, and then frees the temporary buffers. This ensures
+ * that the original hotpants_state_t object is not modified, making the
+ * convolution a read-only operation from the caller's perspective.
+ *
+ * @return 0 on success, -1 on memory allocation failure.
+ */
+static int safe_spatial_convolve(hotpants_state_t *state, float *image, float **variance, int xSize, int ySize, double *kernelSol, float *cRdata, int *cMask)
+{
+    // 1. Save original pointers from the state object.
+    int *original_mRData = state->mRData;
+    double *original_kernel_coeffs = state->kernel_coeffs;
+    double *original_kernel = state->kernel;
+
+    // 2. Allocate temporary buffers for the state members that will be modified.
+    int *temp_mRData = (int *)malloc(xSize * ySize * sizeof(int));
+    double *temp_kernel_coeffs = (double *)malloc(state->nCompKer * sizeof(double));
+    double *temp_kernel = (double *)malloc(state->fwKernel * state->fwKernel * sizeof(double));
+
+    // Check for allocation failures.
+    if (!temp_mRData || !temp_kernel_coeffs || !temp_kernel)
+    {
+        if (temp_mRData) free(temp_mRData);
+        if (temp_kernel_coeffs) free(temp_kernel_coeffs);
+        if (temp_kernel) free(temp_kernel);
+        PyErr_SetString(PyExc_MemoryError, "Failed to allocate temporary buffers for safe convolution");
+        return -1;
+    }
+    // Initialize the temporary mask to zero.
+    memset(temp_mRData, 0, xSize * ySize * sizeof(int));
+
+    // 3. Swap state pointers to point to our temporary "sandbox" buffers.
+    state->mRData = temp_mRData;
+    state->kernel_coeffs = temp_kernel_coeffs;
+    state->kernel = temp_kernel;
+
+    // 4. Call the original, unmodified spatial_convolve function.
+    // It will now write to our temporary buffers instead of the main state.
+    spatial_convolve(state, image, variance, xSize, ySize, kernelSol, cRdata, cMask);
+
+    // 5. Restore the original pointers to the state object.
+    state->mRData = original_mRData;
+    state->kernel_coeffs = original_kernel_coeffs;
+    state->kernel = original_kernel;
+
+    // 6. Free the temporary buffers to prevent memory leaks.
+    free(temp_mRData);
+    free(temp_kernel_coeffs);
+    free(temp_kernel);
+
+    return 0; // Success
+}
+
+
+/**
+ * @brief Python-callable function to generate an image of the kernel.
+ *
+ * This function orchestrates the kernel visualization. It creates a synthetic
+ * delta image and uses the safe_spatial_convolve wrapper to convolve it with
+ * the kernel solution valid for the requested coordinates.
+ */
+static PyObject *py_visualize_kernel(PyObject *self, PyObject *args)
+{
+    HotpantsStateObject *state_obj;
+    PyObject *coords_tuple;
+    PyArrayObject *kernel_solution_arr;
+    float size_factor;
+
+    if (!PyArg_ParseTuple(args, "O!O!O!f",
+                          &HotpantsState_Type, &state_obj,
+                          &PyTuple_Type, &coords_tuple,
+                          &PyArray_Type, &kernel_solution_arr,
+                          &size_factor)) {
+        return NULL;
+    }
+    hotpants_state_t *state = state_obj->state;
+
+    // Parse coordinates from the tuple
+    int x_coord = PyLong_AsLong(PyTuple_GetItem(coords_tuple, 0));
+    int y_coord = PyLong_AsLong(PyTuple_GetItem(coords_tuple, 1));
+
+    // --- Prepare inputs for the safe convolution ---
+    int size = (int)(state->fwKernel * size_factor);
+    if (size <= 0) {
+        PyErr_SetString(PyExc_ValueError, "size_factor results in a non-positive image dimension");
+        return NULL;
+    }
+
+    // Create a synthetic "delta image" (an impulse)
+    float *delta_image = (float *)calloc(size * size, sizeof(float));
+    if (!delta_image) {
+        PyErr_SetString(PyExc_MemoryError, "Failed to allocate delta_image");
+        return NULL;
+    }
+    delta_image[(size / 2) + (size / 2) * size] = 1.0f;
+
+    // Create a dummy input mask (all pixels are good)
+    int *dummy_mask = (int *)calloc(size * size, sizeof(int));
+    if (!dummy_mask) {
+        free(delta_image);
+        PyErr_SetString(PyExc_MemoryError, "Failed to allocate dummy_mask");
+        return NULL;
+    }
+
+    // Create the output buffer for the final kernel image
+    float *output_kernel_image = (float *)calloc(size * size, sizeof(float));
+    if (!output_kernel_image) {
+        free(delta_image);
+        free(dummy_mask);
+        PyErr_SetString(PyExc_MemoryError, "Failed to allocate output_kernel_image");
+        return NULL;
+    }
+
+    // The variance image is not needed for visualization
+    float *variance = NULL;
+
+    // --- Execute the safe convolution ---
+    if (safe_spatial_convolve(state, delta_image, &variance, size, size, (double *)PyArray_DATA(kernel_solution_arr), output_kernel_image, dummy_mask) != 0) {
+        // Error already set by safe_spatial_convolve
+        free(delta_image);
+        free(dummy_mask);
+        free(output_kernel_image);
+        return NULL;
+    }
+
+    // --- Clean up and return the result ---
+    free(delta_image);
+    free(dummy_mask);
+
+    // Wrap the output buffer in a NumPy array, transferring memory ownership
+    npy_intp dims[] = {size, size};
+    PyObject *kernel_image_arr = PyArray_SimpleNewFromData(2, dims, NPY_FLOAT32, output_kernel_image);
+    if (!kernel_image_arr) {
+        free(output_kernel_image);
+        PyErr_SetString(PyExc_MemoryError, "Failed to create NumPy array for kernel image");
+        return NULL;
+    }
+    PyArray_ENABLEFLAGS((PyArrayObject *)kernel_image_arr, NPY_ARRAY_OWNDATA);
+
+    return kernel_image_arr;
 }

@@ -29,7 +29,7 @@ def _get_ext():
     return hotpants_ext
 
 
-__version__ = "1.1.0"
+__version__ = "0.1.0"
 
 
 class HotpantsError(Exception):
@@ -62,10 +62,6 @@ class Substamp:
         self.template_cutout: Optional[np.ndarray] = None
         self.noise_variance_cutout: Optional[np.ndarray] = None
         self.fit_results: Dict[str, Dict[str, float]] = {}
-        self.basis_vectors: Optional[np.ndarray] = None
-        self.local_solution: Optional[np.ndarray] = None
-        self.convolved_model_local: Optional[np.ndarray] = None
-        self.convolved_model_global: Optional[np.ndarray] = None
 
     def __repr__(self) -> str:
         return f"Substamp(id={self.id}, group={self.stamp_group_id}, coords=({self.x:.2f}, {self.y:.2f}), status={self.status.name})"
@@ -353,8 +349,6 @@ class Hotpants:
                 substamp.template_cutout = result["template_cutout"]
                 substamp.noise_variance_cutout = result["noise_cutout"]
                 substamp.fit_results["t"] = {"fom": result["fom"], "chi2": result["chi2"]}
-                substamp.basis_vectors = result["basis_vectors"]
-                substamp.local_solution = result["local_solution"]
 
         # Fit image-derived substamps
         if self.image_substamps:
@@ -365,8 +359,6 @@ class Hotpants:
                 substamp.template_cutout = result["template_cutout"]
                 substamp.noise_variance_cutout = result["noise_cutout"]
                 substamp.fit_results["i"] = {"fom": result["fom"], "chi2": result["chi2"]}
-                substamp.basis_vectors = result["basis_vectors"]
-                substamp.local_solution = result["local_solution"]
 
         # Select best direction
         conv_direction = self.config.force_convolve
@@ -529,6 +521,39 @@ class Hotpants:
         self.iterative_fit_and_clip()
         self.convolve_and_difference()
         return self.get_final_outputs()
+
+    def visualize_kernel(self, at_coords: Tuple[int, int], size_factor: float = 2.0) -> np.ndarray:
+        """
+        Generates an image of the convolution kernel at a specific coordinate.
+
+        This method should be called *after* the pipeline has been run and a
+        kernel solution has been found. It uses the final kernel solution to
+        reconstruct the kernel for the given (x, y) location.
+
+        Args:
+            at_coords (Tuple[int, int]): The (x, y) coordinates at which to visualize the kernel.
+            size_factor (float, optional): A multiplier for the kernel's width to
+                determine the output image size. Defaults to 2.0.
+
+        Returns:
+            np.ndarray: A 2D NumPy array containing the image of the kernel.
+
+        Raises:
+            HotpantsError: If the kernel fitting has not been run yet.
+            TypeError: If at_coords is not a tuple of two integers.
+            ValueError: If size_factor is not a positive number.
+        """
+        if "kernel_solution" not in self.results:
+            raise HotpantsError("Kernel solution not found. The fitting pipeline must be run before a kernel can be visualized.")
+
+        if not (isinstance(at_coords, tuple) and len(at_coords) == 2 and all(isinstance(i, int) for i in at_coords)):
+            raise TypeError("at_coords must be a tuple of two integers (x, y).")
+
+        if not isinstance(size_factor, (int, float)) or size_factor <= 0:
+            raise ValueError("size_factor must be a positive number.")
+
+        kernel_image = self.ext.visualize_kernel(self._c_state, at_coords, self.results["kernel_solution"], size_factor)
+        return kernel_image
 
     def get_substamp_details(self) -> Dict[str, Any]:
         """
