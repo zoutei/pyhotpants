@@ -7,7 +7,6 @@
 #include <math.h>
 #include <stdlib.h>
 #include <time.h>
-#include <unistd.h>
 #include <assert.h>
 
 // Include the original hotpants headers
