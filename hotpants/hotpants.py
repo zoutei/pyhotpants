@@ -8,8 +8,14 @@ fine-grained control.
 """
 
 import numpy as np
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Union
 from enum import Enum, auto
+import warnings
+from astropy.io import fits
+import getpass
+import socket
+from datetime import datetime
+
 
 from . import functions as pyhotpants
 
@@ -31,7 +37,7 @@ def _get_ext():
     return hotpants_ext
 
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 class HotpantsError(Exception):
@@ -156,6 +162,14 @@ class HotpantsConfig:
         # [-nsy ystamp]     : number of each region's stamps in y dimension (10)
         self.nstampy = kwargs.get("nstampy", 10)
 
+        # Output file paths
+        self.output_file = kwargs.get("output_file", None)
+        self.noise_image_file = kwargs.get("noise_image_file", None)
+        self.mask_image_file = kwargs.get("mask_image_file", None)
+        self.convolved_image_file = kwargs.get("convolved_image_file", None)
+        self.sigma_image_file = kwargs.get("sigma_image_file", None)
+        self.stamp_region_file = kwargs.get("stamp_region_file", None)
+
         # Derived values for C code
         self.hwkernel = self.rkernel
         self.hwksstamp = self.rss
@@ -207,22 +221,23 @@ class Hotpants:
 
     def __init__(
         self,
-        template_data: np.ndarray,
-        image_data: np.ndarray,
+        template_data: Union[np.ndarray, str],
+        image_data: Union[np.ndarray, str],
         t_mask: Optional[np.ndarray] = None,
         i_mask: Optional[np.ndarray] = None,
         t_error: Optional[np.ndarray] = None,
         i_error: Optional[np.ndarray] = None,
         star_catalog: Optional[np.ndarray] = None,
         config: Optional[HotpantsConfig] = None,
+        output_header: Optional[fits.Header] = None,
     ):
         """
         Initializes the Hotpants object with template and image data.
         This now also creates the initial masks and noise images.
 
         Args:
-            template_data (np.ndarray): The template image data.
-            image_data (np.ndarray): The image data to be differenced.
+            template_data (np.ndarray or str): The template image data or file path.
+            image_data (np.ndarray or str): The image data to be differenced or file path.
             t_mask (np.ndarray, optional): An optional mask for the template.
             i_mask (np.ndarray, optional): An optional mask for the image.
             t_error (np.ndarray, optional): An optional error/noise image for the template.
@@ -231,8 +246,28 @@ class Hotpants:
                 star positions to use for kernel fitting, bypassing the stamp search.
                 Must be in 1-based system coordinates.
             config (HotpantsConfig, optional): A custom configuration object.
+            output_header (fits.Header, optional): An astropy FITS header to use for output files.
+                If loading from FITS, the image header is used by default.
         """
         self.ext = _get_ext()
+        self.output_header = output_header
+
+        if isinstance(template_data, str):
+            self.template_path = template_data
+            template_data, self.template_header = self._load_fits(template_data)
+        else:
+            self.template_path = "in-memory"
+            self.template_header = None
+
+        if isinstance(image_data, str):
+            self.image_path = image_data
+            image_data, self.image_header = self._load_fits(image_data)
+            if self.output_header is None:
+                self.output_header = self.image_header
+        else:
+            self.image_path = "in-memory"
+            self.image_header = None
+
         self._validate_images(template_data, image_data, "template and image")
 
         self.template_data = np.ascontiguousarray(template_data, dtype=np.float32)
@@ -299,6 +334,27 @@ class Hotpants:
         # 3. Store the squared noise images for later use.
         self.results["t_noise_sq"] = t_noise_sq
         self.results["i_noise_sq"] = i_noise_sq
+
+    @staticmethod
+    def _load_fits(filename: str) -> Tuple[np.ndarray, fits.Header]:
+        """Loads FITS data, preferring extension 1, then primary."""
+        with fits.open(filename) as hdul:
+            if len(hdul) > 1:
+                try:
+                    data = hdul[1].data
+                    header = hdul[1].header
+                    if data is None:  # Check if extension has no data
+                        data = hdul[0].data
+                        header = hdul[0].header
+                except IndexError:
+                    data = hdul[0].data
+                    header = hdul[0].header
+            else:
+                data = hdul[0].data
+                header = hdul[0].header
+        if data is None:
+            raise HotpantsError(f"No image data found in FITS file: {filename}")
+        return data.astype(np.float32), header
 
     def __del__(self):
         """Ensures the C state object is properly deallocated."""
@@ -520,13 +576,121 @@ class Hotpants:
             "fit_stats": self.results.get("fit_stats"),
         }
 
+    def save_outputs(self):
+        """Saves all configured output files (FITS images and region files)."""
+        if "diff_image" not in self.results:
+            # This ensures all necessary data products are computed
+            self.get_final_outputs()
+
+        header_to_use = self.output_header
+        # Check if any FITS saving is requested
+        if any([self.config.output_file, self.config.noise_image_file, self.config.mask_image_file, self.config.convolved_image_file, self.config.sigma_image_file]):
+            if header_to_use is None:
+                warnings.warn("No FITS header available. Creating a minimal header. WCS and other metadata will be missing.")
+                header_to_use = fits.Header()
+
+        if self.config.stamp_region_file:
+            self._save_stamp_region_file(self.config.stamp_region_file)
+
+        # Save FITS files if configured
+        if self.config.output_file:
+            self._save_fits_image(self.config.output_file, self.results["diff_image"], header_to_use, "difference")
+        if self.config.noise_image_file:
+            self._save_fits_image(self.config.noise_image_file, self.results["noise_image"], header_to_use, "noise")
+        if self.config.mask_image_file:
+            self._save_fits_image(self.config.mask_image_file, self.results["output_mask"], header_to_use, "mask")
+        if self.config.convolved_image_file:
+            self._save_fits_image(self.config.convolved_image_file, self.results["convolved_image"], header_to_use, "convolved")
+        if self.config.sigma_image_file:
+            # Calculate sigma image on the fly
+            sigma_image = np.divide(self.results["diff_image"], self.results["noise_image"], out=np.full_like(self.results["diff_image"], self.config.fillval), where=self.results["noise_image"] != 0)
+            self._save_fits_image(self.config.sigma_image_file, sigma_image, header_to_use, "sigma")
+
+    def _save_stamp_region_file(self, filename: str):
+        """Saves a DS9 region file showing used and rejected stamps."""
+        conv_direction = self.results.get("conv_direction")
+        if not conv_direction:
+            return
+
+        stamps_to_plot = self.template_substamps if conv_direction == "t" else self.image_substamps
+        box_size = self.config.fwksstamp
+
+        with open(filename, "w") as f:
+            f.write("# DS9 region file format\n")
+            f.write("global color=green width=2\n")
+            f.write("image\n")
+
+            for s in stamps_to_plot:
+                color = None
+                if s.status == SubstampStatus.USED_IN_FINAL_FIT:
+                    color = "green"
+                elif s.status == SubstampStatus.REJECTED_ITERATIVE_FIT:
+                    color = "red"
+                elif s.status == SubstampStatus.REJECTED_FOM_CHECK:
+                    color = "yellow"
+
+                if color:
+                    # DS9 uses 1-based coordinates
+                    f.write(f"box({s.x + 1},{s.y + 1},{box_size},{box_size},0) # color={color}\n")
+        if self.config.verbose >= 1:
+            print(f"Saved stamp region file to {filename}")
+
+    def _save_fits_image(self, filename: str, data: np.ndarray, header: fits.Header, image_type: str):
+        """Internal helper to save a FITS image with replicated headers."""
+        # Create a copy to avoid modifying the original header object in memory
+        hdr = header.copy()
+
+        # Add HOTPANTS specific headers, replicating main.c
+        hdr.add_blank("", before=0)
+        hdr.set("SOFTNAME", "HOTPanTS", "The software that differenced this image", after=0)
+        hdr.set("SOFTVERS", __version__, "Version", after="SOFTNAME")
+        hdr.set("SOFTAUTH", "A. Becker / A. Rest", "Author", after="SOFTVERS")
+        try:
+            hdr.set("AUTHOR", getpass.getuser(), "Who ran the software", after="SOFTAUTH")
+        except Exception:
+            hdr.set("AUTHOR", "unknown", "Who ran the software", after="SOFTAUTH")
+        try:
+            hdr.set("ORIGIN", socket.gethostname(), "Where it was done", after="AUTHOR")
+        except Exception:
+            hdr.set("ORIGIN", "unknown", "Where it was done", after="AUTHOR")
+        hdr.set("DATE", datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"), "When it was started (GMT)", after="ORIGIN")
+        hdr.add_blank("", after="DATE")
+
+        stats = self.results.get("stats", {})
+        fit_stats = self.results.get("fit_stats", {})
+
+        hdr.set("CONVOL00", self.results.get("conv_direction", "N/A").upper(), "Direction of convolution")
+        # Calculate kernel sum at center of image
+        kernel_center = self.visualize_kernel(at_coords=(self.nx // 2, self.ny // 2), size_factor=1.0)
+        hdr.set("KSUM00", float(np.sum(kernel_center)), "Kernel Sum at image center")
+        hdr.set("SSSIG00", fit_stats.get("meansig", -1.0), "Average Figure of Merit across Stamps")
+        hdr.set("SSSCAT00", fit_stats.get("scatter", -1.0), "Stdev in Figure of Merit")
+        hdr.set("X2NRM00", stats.get("x2norm", -1.0), "1/N * SUM (diff/noise)^2")
+        hdr.set("NX2NRM00", stats.get("nx2norm", -1), "Number of pixels in X2NRM")
+        hdr.set("DMEAN00", stats.get("diff_mean", -1.0), "Mean of diff image; good pixels")
+        hdr.set("DSIGE00", stats.get("diff_std", -1.0), "Stdev of diff image; good pixels")
+        hdr.set("DSIG00", stats.get("noise_mean", -1.0), "Mean of noise image; good pixels")
+
+        if image_type == "mask":
+            # Save mask as 16-bit integer with BZERO/BSCALE for compatibility with C output
+            hdu = fits.PrimaryHDU(data=data.astype(np.int16), header=hdr)
+            hdu.header["BITPIX"] = 16
+            hdu.scale("int16", bzero=32768)
+        else:
+            hdu = fits.PrimaryHDU(data=data, header=hdr)
+
+        hdu.writeto(filename, overwrite=True)
+        if self.config.verbose >= 1:
+            print(f"Saved {image_type} image to {filename}")
+
     def run_pipeline(self) -> Dict[str, Any]:
         """A convenience method to run the entire pipeline in a single call."""
         self.find_stamps()
         self.fit_and_select_direction()
         self.iterative_fit_and_clip()
         self.convolve_and_difference()
-        return self.get_final_outputs()
+        self.get_final_outputs()
+        self.save_outputs()
 
     def visualize_kernel(self, at_coords: Tuple[int, int], size_factor: float = 2.0) -> np.ndarray:
         """
