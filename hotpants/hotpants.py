@@ -229,6 +229,7 @@ class Hotpants:
             i_error (np.ndarray, optional): An optional error/noise image for the image.
             star_catalog (np.ndarray, optional): A pre-existing array of
                 star positions to use for kernel fitting, bypassing the stamp search.
+                Must be in 1-based system coordinates.
             config (HotpantsConfig, optional): A custom configuration object.
         """
         self.ext = _get_ext()
@@ -245,7 +246,7 @@ class Hotpants:
         if star_catalog is not None:
             if not isinstance(star_catalog, np.ndarray) or star_catalog.ndim != 2 or star_catalog.shape[1] != 2:
                 raise HotpantsError("star_catalog must be a 2D NumPy array with shape (N, 2).")
-            self.star_catalog = np.ascontiguousarray(star_catalog, dtype=np.float32)
+            self.star_catalog = np.ascontiguousarray(star_catalog, dtype=np.float32) - 1
         else:
             self.star_catalog = None
 
