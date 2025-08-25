@@ -58,7 +58,36 @@ class SubstampStatus(Enum):
 
 
 class Substamp:
-    """Data class to hold all information about a single substamp."""
+    """
+    Data class to hold all information about a single substamp.
+
+    A substamp is a small cutout of an image centered on a bright, isolated
+    star, used to model the convolution kernel. This class tracks the data
+    and status of each substamp throughout the pipeline.
+
+    Attributes:
+        id (int): A unique identifier for the substamp.
+        stamp_group_id (int): The identifier for the parent stamp region.
+        x (float): The x-coordinate of the substamp center.
+        y (float): The y-coordinate of the substamp center.
+        status (SubstampStatus): The current processing status of the substamp.
+        image_cutout (np.ndarray): The pixel data from the science image.
+        template_cutout (np.ndarray): The pixel data from the template image.
+        noise_variance_cutout (np.ndarray): The noise variance in the cutout region.
+        fit_results (dict): A dictionary containing results from local fits.
+        local_kernel_solution (np.ndarray): The kernel solution coefficients
+            derived from this substamp alone.
+        convolved_model_local (np.ndarray): The convolved model of this
+            substamp using its local solution.
+        convolved_model_global (np.ndarray): The convolved model of this
+            substamp using the final global solution.
+        basis_vectors (np.ndarray): A 3D array representing the kernel basis
+            functions convolved with the image data at this location. This is
+            the core component for the linear fit, as described in the Alard &
+            Lupton (1998) paper. Each 2D slice of this array is one of the
+            Gaussian-Laguerre basis functions convolved with the local image
+            data, forming the design matrix for the least-squares fit.
+    """
 
     def __init__(self, substamp_id: int, stamp_group_id: int, x: int, y: int):
         self.id: int = substamp_id
@@ -77,10 +106,78 @@ class Substamp:
 
 class HotpantsConfig:
     """
-    Configuration class for HOTPANTS parameters, mirroring the original C defaults.
+    Configuration class for HOTPANTS parameters.
+
+    This class holds all the tunable parameters for the HOTPANTS algorithm,
+    mirroring the command-line flags of the original C implementation. Default
+    values are set to match the original code.
+
+    An instance of this class is created by the Hotpants object, but a custom,
+    pre-configured instance can also be passed during initialization.
+
+    Attributes:
+        tuthresh (float): Upper valid data count for the template.
+            (Default: dynamically set to max value).
+        tuktresh (float): Upper valid data count for kernel fitting on the template.
+            (Default: Same as tuthresh).
+        tlthresh (float): Lower valid data count for the template.
+            (Default: dynamically set to min value).
+        tgain (float): Gain in template (e-/ADU). (Default: 1.0).
+        trdnoise (float): Read noise in template (e-). (Default: 0.0).
+        tpedestal (float): ADU pedestal in template. (Default: 0.0).
+        iuthresh (float): Upper valid data count for the image.
+            (Default: dynamically set to max value).
+        iuktresh (float): Upper valid data count for kernel fitting on the image.
+            (Default: Same as iuthresh).
+        ilthresh (float): Lower valid data count for the image.
+            (Default: dynamically set to min value).
+        igain (float): Gain in image (e-/ADU). (Default: 1.0).
+        irdnoise (float): Read noise in image (e-). (Default: 0.0).
+        ipedestal (float): ADU pedestal in image. (Default: 0.0).
+        rkernel (int): Convolution kernel half-width in pixels. (Default: 10).
+        ko (int): Spatial order of kernel variation within a region. (Default: 2).
+        bgo (int): Spatial order of background variation within a region. (Default: 1).
+        fitthresh (float): RMS threshold for good centroids in kernel fit. (Default: 20.0).
+        nss (int): Number of centroids (sub-stamps) to use for each stamp. (Default: 3).
+        rss (int): Half-width of sub-stamps to extract around each centroid. (Default: 15).
+        ks (float): High sigma rejection for bad stamps in the kernel fit. (Default: 2.0).
+        kfm (float): Fraction of absolute kernel sum for a pixel to be considered 'OK'. (Default: 0.990).
+        stat_sig (float): Threshold for sigma clipping statistics. (Default: 3.0).
+        kf_spread_mask1 (float): Fraction of kernel half-width to spread input masks by. (Default: 1.0).
+        verbose (int): Level of verbosity, 0-2. (Default: 1).
+        force_convolve (str): Force convolution on 't' (template) or 'i' (image). 'b' for best. (Default: 'b').
+        normalize (str): Normalize to 't' (template), 'i' (image), or 'u' (unconvolved). (Default: 't').
+        fom (str): Figure-of-merit for choosing convolution direction: 'v' (variance), 's' (sigma), or 'h' (histogram). (Default: 'v').
+        fillval (float): Value for invalid (bad) pixels in the difference image. (Default: 1.0e-30).
+        fillval_noise (float): Value for invalid pixels in the noise image. (Default: 0.0).
+        rescale_ok (bool): If True, rescale noise for 'OK' pixels. (Default: False).
+        conv_var (bool): If True, convolve variance instead of noise. (Default: False).
+        use_pca (bool): If True, use PCA to model the kernel basis (not fully supported). (Default: False).
+        nstampx (int): Number of stamps to place in the x-direction per region. (Default: 10).
+        nstampy (int): Number of stamps to place in the y-direction per region. (Default: 10).
+        output_file (str): Path to save the difference FITS image. (Default: None).
+        noise_image_file (str): Path to save the noise FITS image. (Default: None).
+        mask_image_file (str): Path to save the mask FITS image. (Default: None).
+        convolved_image_file (str): Path to save the convolved FITS image. (Default: None).
+        sigma_image_file (str): Path to save the sigma (difference/noise) FITS image. (Default: None).
+        stamp_region_file (str): Path to save the DS9 region file of stamps. (Default: None).
+
+        Note:
+            The following parameters from the original HOTPANTS are not implemented in this wrapper:
+            - `scale_fitthresh` (-sft): Logic to scale `fitthresh` is not used.
+            - `min_frac_stamps` (-nft): Check for minimum fraction of filled stamps is not used.
+            - `nregx` and `nregy`: The wrapper treats the entire image as a single region, so these are fixed to 1.
     """
 
     def __init__(self, **kwargs):
+        """
+        Initializes the configuration object.
+
+        Args:
+            **kwargs: Keyword arguments corresponding to HOTPANTS parameters.
+                For example, `rkernel=15` to set the kernel half-width. Any
+                parameter not provided will use the default value.
+        """
         # Image-specific parameters
         # [-tu tuthresh]    : upper valid data count, template (max value in template)
         self.tuthresh = kwargs.get("tuthresh", None)
@@ -116,10 +213,6 @@ class HotpantsConfig:
         self.bgo = kwargs.get("bgo", 1)
         # [-ft fitthresh]   : RMS threshold for good centroid in kernel fit (20.0)
         self.fitthresh = kwargs.get("fitthresh", 20.0)
-        # # [-sft scale]      : scale fitthresh by this fraction if... (0.5)
-        self.scale_fitthresh = kwargs.get("scale_fitthresh", 0.5)
-        # [-nft fraction]   : this fraction of stamps are not filled (0.1)
-        self.min_frac_stamps = kwargs.get("min_frac_stamps", 0.1)
         # [-nss substamps]  : number of centroids to use for each stamp (3)
         self.nss = kwargs.get("nss", 3)
         # [-rss radius]     : half width substamp to extract around each centroid (15)
@@ -216,7 +309,22 @@ class HotpantsConfig:
 class Hotpants:
     """
     The central HOTPANTS object for stateful image differencing.
-    The public methods correspond to the major steps of the pipeline.
+
+    This class orchestrates the entire image subtraction pipeline. It holds the
+    input data, configuration, and intermediate results. The public methods
+    correspond to the major steps of the pipeline, allowing for either a full
+    end-to-end run or step-by-step execution for detailed analysis.
+
+    Example:
+        >>> from hotpants import Hotpants, HotpantsConfig
+        >>> # Create a custom configuration
+        >>> config = HotpantsConfig(rkernel=15, normalize='i')
+        >>> # Initialize with FITS file paths
+        >>> hp = Hotpants('template.fits', 'science.fits', config=config)
+        >>> # Run the entire pipeline
+        >>> results = hp.run_pipeline()
+        >>> # Access the difference image
+        >>> diff_image = results['diff_image']
     """
 
     def __init__(
@@ -232,22 +340,30 @@ class Hotpants:
         output_header: Optional[fits.Header] = None,
     ):
         """
-        Initializes the Hotpants object with template and image data.
-        This now also creates the initial masks and noise images.
+        Initializes the Hotpants object and performs pre-processing.
+
+        This sets up the pipeline by loading images, creating initial masks,
+        and generating noise models.
 
         Args:
-            template_data (np.ndarray or str): The template image data or file path.
-            image_data (np.ndarray or str): The image data to be differenced or file path.
-            t_mask (np.ndarray, optional): An optional mask for the template.
-            i_mask (np.ndarray, optional): An optional mask for the image.
-            t_error (np.ndarray, optional): An optional error/noise image for the template.
-            i_error (np.ndarray, optional): An optional error/noise image for the image.
-            star_catalog (np.ndarray, optional): A pre-existing array of
-                star positions to use for kernel fitting, bypassing the stamp search.
-                Must be in 1-based system coordinates.
-            config (HotpantsConfig, optional): A custom configuration object.
-            output_header (fits.Header, optional): An astropy FITS header to use for output files.
-                If loading from FITS, the image header is used by default.
+            template_data: The template image data as a 2D NumPy array or a
+                path to a FITS file.
+            image_data: The science image data as a 2D NumPy array or a
+                path to a FITS file.
+            t_mask: An optional integer mask for the template image where
+                pixels with values > 0 are considered bad.
+            i_mask: An optional integer mask for the science image.
+            t_error: An optional error map for the template.
+                If not provided, a noise model is generated automatically.
+            i_error: An optional error map for the science image.
+            star_catalog: A pre-existing array of star positions (shape [N, 2])
+                to use for kernel fitting, bypassing the stamp search.
+                Coordinates should be 1-based (FITS convention).
+            config: A custom `HotpantsConfig` object. If None, default
+                parameters are used.
+            output_header: An `astropy.io.fits.Header` object to use for all
+                output FITS files. If loading from FITS files, the header of
+                the science image is used by default.
         """
         self.ext = _get_ext()
         self.output_header = output_header
@@ -371,8 +487,20 @@ class Hotpants:
 
     def find_stamps(self) -> Tuple[List[Substamp], List[Substamp]]:
         """
-        Step 1: Finds potential substamp coordinates.
-        This populates the master lists with Substamp objects containing only coordinate data.
+        Step 1: Finds potential substamp coordinates for kernel fitting.
+
+        This method scans the template and science images for suitable stars
+        to use for constructing the convolution kernel. If a `star_catalog` was
+        provided during initialization, this catalog is used directly,
+        bypassing the automated search. Otherwise, a grid-based search is
+        performed to find bright, isolated stars.
+
+        It populates the `template_substamps` and `image_substamps` lists with
+        `Substamp` objects, which initially contain only coordinate information.
+
+        Returns:
+            A tuple containing two lists: the `Substamp` objects found on the
+            template and the `Substamp` objects found on the science image.
         """
         t_substamps_coords, i_substamps_coords = self.ext.find_stamps(self._c_state, self.template_data, self.image_data, self.config.fitthresh, self.star_catalog)
 
@@ -389,8 +517,20 @@ class Hotpants:
 
     def fit_and_select_direction(self) -> str:
         """
-        Step 2: Performs initial fits, populates substamp data, and selects the best
-        convolution direction. Updates the status of all tested substamps.
+        Step 2: Performs initial fits and selects the best convolution direction.
+
+        This method performs a localized fit for every potential substamp found
+        in the previous step. A figure-of-merit (FOM) is calculated for each
+        substamp to assess its quality. Stamps that are saturated, near bad
+        pixels, or have a poor local fit (high chi-squared) are rejected.
+
+        The aggregate FOM is then used to decide whether it is better to
+        convolve the template to match the science image or vice-versa. The
+        status of each `Substamp` is updated to either `PASSED_FOM_CHECK` or
+        `REJECTED_FOM_CHECK`.
+
+        Returns:
+            The selected convolution direction, either 't' (template) or 'i' (image).
         """
         if not self.template_substamps and not self.image_substamps:
             self.find_stamps()
@@ -439,8 +579,19 @@ class Hotpants:
 
     def iterative_fit_and_clip(self) -> Tuple[np.ndarray, List[Substamp]]:
         """
-        Step 3 & 4: Performs iterative clipping and computes the global kernel solution.
-        Updates the status of candidate substamps to reflect the outcome.
+        Step 3: Solves for the global kernel using iterative sigma-clipping.
+
+        This method takes all substamps that passed the FOM check and uses them
+        to derive a single, spatially varying kernel solution for the entire
+        image. It iteratively rejects outlier substamps to achieve a robust fit.
+        The status of the substamps is updated to either `USED_IN_FINAL_FIT` or
+        `REJECTED_ITERATIVE_FIT`.
+
+        Returns:
+            A tuple containing:
+            - The global kernel solution as a 1D NumPy array of coefficients.
+            - A list of the `Substamp` objects that survived the clipping and
+              were used in the final fit.
         """
         if "conv_direction" not in self.results:
             self.fit_and_select_direction()
@@ -499,15 +650,19 @@ class Hotpants:
 
     def convolve_and_difference(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
-        Step 5: Applies the final kernel to the appropriate image, calculates the difference,
-        and computes the final noise image.
+        Step 4: Applies the kernel, performs subtraction, and creates final images.
+
+        This method uses the global kernel solution to convolve the appropriate
+        image. It then subtracts the convolved image from the target image to
+        produce the difference image and calculates the corresponding final
+        noise image and output mask.
 
         Returns:
-            Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-                - The difference image
-                - The convolved image
-                - The final noise image
-                - The output mask
+            A tuple containing:
+            - diff_image (np.ndarray): The raw difference image (Target - Convolved Model).
+            - convolved_image (np.ndarray): The image that was convolved to match the other.
+            - noise_image (np.ndarray): The final 1-sigma noise map for the difference image.
+            - output_mask (np.ndarray): The final integer mask indicating bad pixels.
         """
         if "kernel_solution" not in self.results:
             self.iterative_fit_and_clip()
@@ -549,8 +704,20 @@ class Hotpants:
 
     def get_final_outputs(self) -> Dict[str, Any]:
         """
-        Step 6: Applies final masks and calculates statistics.
-        Returns a dictionary of all final output data.
+        Step 5: Applies final masks, calculates statistics, and returns all products.
+
+        This is the final data-producing step. It applies fill values to masked
+        pixels in the output images and calculates final image statistics.
+
+        Returns:
+            A dictionary containing all final data products, including:
+            - 'diff_image': The final, masked difference image.
+            - 'convolved_image': The final, masked convolved image.
+            - 'noise_image': The final, masked noise image.
+            - 'output_mask': The final integer mask.
+            - 'stats': A dictionary of final image statistics.
+            - 'conv_direction': The convolution direction ('t' or 'i').
+            - 'kernel_solution': The global kernel solution coefficients.
         """
         if "diff_image" not in self.results:
             self.convolve_and_difference()
@@ -577,7 +744,14 @@ class Hotpants:
         }
 
     def save_outputs(self):
-        """Saves all configured output files (FITS images and region files)."""
+        """
+        Saves all configured output files (FITS images and region files).
+
+        This method checks the `HotpantsConfig` object for any specified output
+        filenames and writes the corresponding files. This includes the main
+        difference image, noise image, mask, and the diagnostic DS9 region file
+        for the kernel fitting stamps.
+        """
         if "diff_image" not in self.results:
             # This ensures all necessary data products are computed
             self.get_final_outputs()
@@ -684,29 +858,39 @@ class Hotpants:
             print(f"Saved {image_type} image to {filename}")
 
     def run_pipeline(self) -> Dict[str, Any]:
-        """A convenience method to run the entire pipeline in a single call."""
+        """
+        A convenience method to run the entire pipeline in a single call.
+
+        This executes all steps from stamp finding to final output generation
+        and saves any configured output files.
+
+        Returns:
+            A dictionary containing all final data products, as returned by
+            `get_final_outputs`. This includes the final difference image,
+            noise map, mask, and statistics.
+        """
         self.find_stamps()
         self.fit_and_select_direction()
         self.iterative_fit_and_clip()
         self.convolve_and_difference()
-        self.get_final_outputs()
         self.save_outputs()
+        return self.get_final_outputs()
 
     def visualize_kernel(self, at_coords: Tuple[int, int], size_factor: float = 2.0) -> np.ndarray:
         """
         Generates an image of the convolution kernel at a specific coordinate.
 
-        This method should be called *after* the pipeline has been run and a
+        This method should be called *after* the pipeline has run and a
         kernel solution has been found. It uses the final kernel solution to
         reconstruct the kernel for the given (x, y) location.
 
         Args:
-            at_coords (Tuple[int, int]): The (x, y) coordinates at which to visualize the kernel.
-            size_factor (float, optional): A multiplier for the kernel's width to
+            at_coords: The (x, y) coordinates at which to visualize the kernel.
+            size_factor: A multiplier for the kernel's width to
                 determine the output image size. Defaults to 2.0.
 
         Returns:
-            np.ndarray: A 2D NumPy array containing the image of the kernel.
+            A 2D NumPy array containing the image of the kernel.
 
         Raises:
             HotpantsError: If the kernel fitting has not been run yet.
@@ -727,8 +911,14 @@ class Hotpants:
 
     def get_substamp_details(self) -> Dict[str, Any]:
         """
-        Returns the complete, stateful master lists of all substamps and a
-        summary of the locations used in the final fit.
+        Returns the complete, stateful master lists of all substamps.
+
+        This is a diagnostic method to inspect the properties and final status
+        of every substamp considered during the pipeline run.
+
+        Returns:
+            A dictionary containing the full lists of `template_substamps` and
+            `image_substamps`.
         """
         if "conv_direction" not in self.results:
             raise HotpantsError("Pipeline must be run (at least to iterative_fit_and_clip) before getting substamp details.")
