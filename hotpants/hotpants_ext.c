@@ -346,8 +346,8 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
                 PyObject *substamp_dict = PyDict_New();
                 PyDict_SetItemString(substamp_dict, "substamp_id", PyLong_FromLong(t_substamp_id++));
                 PyDict_SetItemString(substamp_dict, "stamp_group_id", PyLong_FromLong(i));
-                PyDict_SetItemString(substamp_dict, "x", PyFloat_FromDouble(state->tStamps[i].xss[j]));
-                PyDict_SetItemString(substamp_dict, "y", PyFloat_FromDouble(state->tStamps[i].yss[j]));
+                PyDict_SetItemString(substamp_dict, "x", PyLong_FromLong((long)state->tStamps[i].xss[j]));
+                PyDict_SetItemString(substamp_dict, "y", PyLong_FromLong((long)state->tStamps[i].yss[j]));
                 PyList_Append(t_substamps_list, substamp_dict);
             }
         }
@@ -362,8 +362,8 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
                 PyObject *substamp_dict = PyDict_New();
                 PyDict_SetItemString(substamp_dict, "substamp_id", PyLong_FromLong(i_substamp_id++));
                 PyDict_SetItemString(substamp_dict, "stamp_group_id", PyLong_FromLong(i));
-                PyDict_SetItemString(substamp_dict, "x", PyFloat_FromDouble(state->iStamps[i].xss[j]));
-                PyDict_SetItemString(substamp_dict, "y", PyFloat_FromDouble(state->iStamps[i].yss[j]));
+                PyDict_SetItemString(substamp_dict, "x", PyLong_FromLong((long)state->iStamps[i].xss[j]));
+                PyDict_SetItemString(substamp_dict, "y", PyLong_FromLong((long)state->iStamps[i].yss[j]));
                 PyList_Append(i_substamps_list, substamp_dict);
             }
         }
@@ -422,8 +422,8 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
         PyObject *substamp_dict = PyList_GetItem(substamps_coord_list, i);
         int group_id = PyLong_AsLong(PyDict_GetItemString(substamp_dict, "stamp_group_id"));
         int current_nss = all_stamps[group_id].nss;
-        all_stamps[group_id].xss[current_nss] = (int)PyFloat_AsDouble(PyDict_GetItemString(substamp_dict, "x"));
-        all_stamps[group_id].yss[current_nss] = (int)PyFloat_AsDouble(PyDict_GetItemString(substamp_dict, "y"));
+        all_stamps[group_id].xss[current_nss] = (int)PyLong_AsLong(PyDict_GetItemString(substamp_dict, "x"));
+        all_stamps[group_id].yss[current_nss] = (int)PyLong_AsLong(PyDict_GetItemString(substamp_dict, "y"));
         all_stamps[group_id].nss++;
     }
 
@@ -570,8 +570,8 @@ static PyObject *py_fit_kernel(PyObject *self, PyObject *args)
         for (int j = 0; j < n_substamps; j++)
         {
             PyObject *substamp_tuple = PyList_GetItem(substamps_list, j);
-            stamps[i].xss[j] = (int)PyFloat_AsDouble(PyTuple_GetItem(substamp_tuple, 0));
-            stamps[i].yss[j] = (int)PyFloat_AsDouble(PyTuple_GetItem(substamp_tuple, 1));
+            stamps[i].xss[j] = (int)PyLong_AsLong(PyTuple_GetItem(substamp_tuple, 0));
+            stamps[i].yss[j] = (int)PyLong_AsLong(PyTuple_GetItem(substamp_tuple, 1));
         }
 
         if (stamps[i].nss > 0)

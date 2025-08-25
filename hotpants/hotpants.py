@@ -60,11 +60,11 @@ class SubstampStatus(Enum):
 class Substamp:
     """Data class to hold all information about a single substamp."""
 
-    def __init__(self, substamp_id: int, stamp_group_id: int, x: float, y: float):
+    def __init__(self, substamp_id: int, stamp_group_id: int, x: int, y: int):
         self.id: int = substamp_id
         self.stamp_group_id: int = stamp_group_id
-        self.x: float = x
-        self.y: float = y
+        self.x: int = int(round(x))
+        self.y: int = int(round(y))
         self.status: SubstampStatus = SubstampStatus.FOUND
         self.image_cutout: Optional[np.ndarray] = None
         self.template_cutout: Optional[np.ndarray] = None
@@ -72,7 +72,7 @@ class Substamp:
         self.fit_results: Dict[str, Dict[str, float]] = {}
 
     def __repr__(self) -> str:
-        return f"Substamp(id={self.id}, group={self.stamp_group_id}, coords=({self.x:.2f}, {self.y:.2f}), status={self.status.name})"
+        return f"Substamp(id={self.id}, group={self.stamp_group_id}, coords=({self.x}, {self.y}), status={self.status.name})"
 
 
 class HotpantsConfig:
@@ -762,8 +762,8 @@ class Hotpants:
         fill_value = self.config.fillval
 
         for substamp in substamps_to_process:
-            x_center = int(round(substamp.x))
-            y_center = int(round(substamp.y))
+            x_center = substamp.x
+            y_center = substamp.y
 
             cutout = pyhotpants.cut_substamp_from_image(image=convolved_image, x_center=x_center, y_center=y_center, half_width=hw, fill_value=fill_value)
             substamp.convolved_model_global = cutout
