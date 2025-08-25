@@ -23,7 +23,7 @@ typedef struct
     float iuthresh, ilthresh, iuktresh, igain, irdnoise, ipedestal;
     int rkernel;
     int ko, bgo;
-    float fitthresh, scale_fitthresh, min_frac_stamps, ks, kfm;
+    float fitthresh, ks, kfm;
     int nss, rss;
     int nregx, nregy, nstampx, nstampy;
     char force_convolve[2], normalize[2], fom[2];
@@ -886,8 +886,6 @@ static int parse_config_dict(PyObject *config_dict, hotpants_config_t *config)
     config->ko = PyLong_AsLong(PyDict_GetItemString(config_dict, "ko"));
     config->bgo = PyLong_AsLong(PyDict_GetItemString(config_dict, "bgo"));
     config->fitthresh = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "fitthresh"));
-    config->scale_fitthresh = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "scale_fitthresh"));
-    config->min_frac_stamps = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "min_frac_stamps"));
     config->nss = PyLong_AsLong(PyDict_GetItemString(config_dict, "nss"));
     config->rss = PyLong_AsLong(PyDict_GetItemString(config_dict, "rss"));
     config->ks = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "ks"));
