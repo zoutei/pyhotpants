@@ -1,5 +1,7 @@
 # pyhotpants — A Python Wrapper for HOTPANTS (High Order Transform of PSF And Template Subtraction) 
 
+![CI](https://github.com/zoutei/pyhotpants/actions/workflows/build.yml/badge.svg)
+
 ## **NOT AFFILIATED | UNDER DEVELOPMENT | USE AT YOUR OWN RISK**
 
 This project is **not** affiliated with the original HOTPANTS project. It is currently under active development and may contain bugs or incomplete features. By using this software you acknowledge that the maintainers are not responsible for any damage, incorrect scientific results, or other issues that may arise from its use.
@@ -40,11 +42,29 @@ Install directly from GitHub:
 pip install git+https://github.com/zoutei/pyhotpants
 ```
 
+## Requirements
+
+- Python: as declared in `pyproject.toml` (>=3.6). We recommend Python 3.8+.
+- Core dependencies (installed automatically):
+    - numpy >= 1.15.0
+    - astropy >= 3.0.0
+
+To install the package for development:
+
+```bash
+pip install -e .
+```
+
+## Documentation
+
+The project's full documentation is published on GitHub Pages: [Online documentation](https://zoute.github.io/pyhotpants).
+
 ## Usage
 
 You can initialize the wrapper with either FITS file paths or in-memory
-NumPy arrays. See the example notebook at `example/JWST_SADES_example.ipynb` for
-a detailed walkthrough.
+NumPy arrays. See the example notebook for a detailed walkthrough:
+
+- `example/JWST_JADES_example.ipynb` (example using JWST/NIRCam data)
 
 ### Running the full pipeline (FITS files)
 
