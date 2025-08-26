@@ -48,6 +48,7 @@ pip install git+https://github.com/zoutei/pyhotpants
 - Core dependencies (installed automatically):
     - numpy >= 1.15.0
     - astropy >= 3.0.0
+    - numba >= 0.51.2
 
 To install the package for development:
 
@@ -57,7 +58,7 @@ pip install -e .
 
 ## Documentation
 
-The project's full documentation is published on GitHub Pages: [Online documentation](https://zoute.github.io/pyhotpants).
+The project's full documentation is published on GitHub Pages: [Online documentation](https://zoutei.github.io/pyhotpants).
 
 ## Usage
 
