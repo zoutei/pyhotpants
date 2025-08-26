@@ -86,6 +86,9 @@
 <li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.convolved_image_file"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.convolved_image_file</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.sigma_image_file"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.sigma_image_file</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.stamp_region_file"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.stamp_region_file</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.ngauss"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.ngauss</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.deg_fixe"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.deg_fixe</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.sigma_gauss"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.sigma_gauss</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.Note"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.Note</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.to_dict"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.to_dict()</span></code></a></li>
 </ul>
@@ -562,6 +565,74 @@ pre-configured instance can also be passed during initialization.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Type<span class="colon">:</span></dt>
 <dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">Kernel</span> <span class="pre">composition</span> <span class="pre">parameters</span></span></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">-----------------------------</span></span></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">The</span> <span class="pre">following</span> <span class="pre">parameters</span> <span class="pre">control</span> <span class="pre">how</span> <span class="pre">the</span> <span class="pre">convolution</span> <span class="pre">kernel</span> <span class="pre">is</span> <span class="pre">constructed</span></span></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">from</span> <span class="pre">a</span> <span class="pre">sum</span> <span class="pre">of</span> <span class="pre">Gaussians.</span> <span class="pre">They</span> <span class="pre">mirror</span> <span class="pre">the</span> <span class="pre">`-ng`</span> <span class="pre">style</span> <span class="pre">flags</span> <span class="pre">in</span> <span class="pre">the</span></span></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">original</span> <span class="pre">HOTPANTS</span> <span class="pre">tool</span> <span class="pre">and</span> <span class="pre">are</span> <span class="pre">passed</span> <span class="pre">through</span> <span class="pre">to</span> <span class="pre">the</span> <span class="pre">C</span> <span class="pre">layer</span> <span class="pre">where</span> <span class="pre">the</span></span></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">kernel</span> <span class="pre">basis</span> <span class="pre">is</span> <span class="pre">built.</span></span></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.ngauss">
+<span class="sig-name descname"><span class="pre">ngauss</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.ngauss" title="Link to this definition"></a></dt>
+<dd><p>Number of Gaussian components which compose the kernel.
+Defaults to 3. Each Gaussian has an associated polynomial degree and
+a sigma (width) value.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.deg_fixe">
+<span class="sig-name descname"><span class="pre">deg_fixe</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.deg_fixe" title="Link to this definition"></a></dt>
+<dd><p>Polynomial degrees associated with each Gaussian
+component. Length should equal <cite>ngauss</cite>. Default: [6, 4, 2]. Each
+entry is the maximum polynomial degree for that Gaussian basis.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>List[int]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.sigma_gauss">
+<span class="sig-name descname"><span class="pre">sigma_gauss</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.sigma_gauss" title="Link to this definition"></a></dt>
+<dd><p>Widths (sigma) of each Gaussian component in
+pixels. Length should equal <cite>ngauss</cite>. Default: [0.7, 1.5, 3.0].</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>List[float]</p>
 </dd>
 </dl>
 </dd></dl>
