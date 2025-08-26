@@ -1,7 +1,9 @@
-build/
 build_wheels/
 .eggs/
 .vscode/
 *.egg-info/
+docs/build/
+__pycache__/
 *.pyc
 *.so
+.DS_Store
