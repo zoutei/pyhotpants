@@ -5,3 +5,5 @@ sphinx_markdown_builder
 sphinx_rtd_theme
 myst-parser
 numpy
+astropy
+numba
