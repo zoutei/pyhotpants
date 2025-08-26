@@ -277,27 +277,46 @@ class Hotpants:
 
         combined_error_sq = self.results["t_noise_sq"] + self.results["i_noise_sq"]
         t_fom, i_fom = float("inf"), float("inf")
-        t_fit_results, i_fit_results = None, None
+        t_fit_results, i_fit_results = [], []
+
+        # Create maps for easy lookup of substamp objects by their unique ID
+        t_substamp_map = {s.id: s for s in self.template_substamps}
+        i_substamp_map = {s.id: s for s in self.image_substamps}
 
         # Fit template-derived substamps
         if self.template_substamps:
             t_coords = [{"substamp_id": s.id, "stamp_group_id": s.stamp_group_id, "x": s.x, "y": s.y} for s in self.template_substamps]
             t_fom, t_fit_results = self.ext.fit_stamps_and_get_fom(self._c_state, self.template_data, self.image_data, combined_error_sq, "t", t_coords)
-            for substamp, result in zip(self.template_substamps, t_fit_results):
-                substamp.image_cutout = result["image_cutout"]
-                substamp.template_cutout = result["template_cutout"]
-                substamp.noise_variance_cutout = result["noise_cutout"]
-                substamp.fit_results["t"] = {"fom": result["fom"], "chi2": result["chi2"]}
+
+            # Populate substamp objects with the complete, isolated results from the C extension
+            for result in t_fit_results:
+                substamp = t_substamp_map.get(result["substamp_id"])
+                if substamp:
+                    substamp.image_cutout = result["image_cutout"]
+                    substamp.template_cutout = result["template_cutout"]
+                    substamp.noise_variance_cutout = result["noise_cutout"]
+                    substamp.basis_vectors = result["basis_vectors"]
+                    substamp.local_kernel_solution = result["local_solution"]
+                    substamp.convolved_model_local = result["convolved_model_local"]
+                    substamp.fit_results["t"] = {"fom": result["fom"], "chi2": result["chi2"]}
 
         # Fit image-derived substamps
         if self.image_substamps:
             i_coords = [{"substamp_id": s.id, "stamp_group_id": s.stamp_group_id, "x": s.x, "y": s.y} for s in self.image_substamps]
             i_fom, i_fit_results = self.ext.fit_stamps_and_get_fom(self._c_state, self.image_data, self.template_data, combined_error_sq, "i", i_coords)
-            for substamp, result in zip(self.image_substamps, i_fit_results):
-                substamp.image_cutout = result["image_cutout"]
-                substamp.template_cutout = result["template_cutout"]
-                substamp.noise_variance_cutout = result["noise_cutout"]
-                substamp.fit_results["i"] = {"fom": result["fom"], "chi2": result["chi2"]}
+
+            # Populate substamp objects with the complete, isolated results from the C extension
+            for result in i_fit_results:
+                substamp = i_substamp_map.get(result["substamp_id"])
+                if substamp:
+                    # Note: For 'i' direction, the roles of image/template are swapped in the C output
+                    substamp.image_cutout = result["template_cutout"]
+                    substamp.template_cutout = result["image_cutout"]
+                    substamp.noise_variance_cutout = result["noise_cutout"]
+                    substamp.basis_vectors = result["basis_vectors"]
+                    substamp.local_kernel_solution = result["local_solution"]
+                    substamp.convolved_model_local = result["convolved_model_local"]
+                    substamp.fit_results["i"] = {"fom": result["fom"], "chi2": result["chi2"]}
 
         # Select best direction
         conv_direction = self.config.force_convolve
@@ -308,11 +327,15 @@ class Hotpants:
 
         # Update status based on the winning direction
         if conv_direction == "t":
-            for substamp, result in zip(self.template_substamps, t_fit_results):
-                substamp.status = SubstampStatus.PASSED_FOM_CHECK if result["survived_check"] else SubstampStatus.REJECTED_FOM_CHECK
+            for result in t_fit_results:
+                substamp = t_substamp_map.get(result["substamp_id"])
+                if substamp:
+                    substamp.status = SubstampStatus.PASSED_FOM_CHECK if result["survived_check"] else SubstampStatus.REJECTED_FOM_CHECK
         else:  # 'i'
-            for substamp, result in zip(self.image_substamps, i_fit_results):
-                substamp.status = SubstampStatus.PASSED_FOM_CHECK if result["survived_check"] else SubstampStatus.REJECTED_FOM_CHECK
+            for result in i_fit_results:
+                substamp = i_substamp_map.get(result["substamp_id"])
+                if substamp:
+                    substamp.status = SubstampStatus.PASSED_FOM_CHECK if result["survived_check"] else SubstampStatus.REJECTED_FOM_CHECK
 
         self.results["conv_direction"] = conv_direction
         return conv_direction
