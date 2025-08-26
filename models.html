@@ -45,7 +45,33 @@
 <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a></li>
 <li class="toctree-l1"><a class="reference internal" href="config.html">Configuration Reference</a></li>
-<li class="toctree-l1 current"><a class="current reference internal" href="#">The Substamp Class</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">The Substamp Class</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#hotpants.models.Substamp"><code class="docutils literal notranslate"><span class="pre">Substamp</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.Substamp.id"><code class="docutils literal notranslate"><span class="pre">Substamp.id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.Substamp.stamp_group_id"><code class="docutils literal notranslate"><span class="pre">Substamp.stamp_group_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.Substamp.x"><code class="docutils literal notranslate"><span class="pre">Substamp.x</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.Substamp.y"><code class="docutils literal notranslate"><span class="pre">Substamp.y</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.Substamp.status"><code class="docutils literal notranslate"><span class="pre">Substamp.status</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.Substamp.image_cutout"><code class="docutils literal notranslate"><span class="pre">Substamp.image_cutout</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.Substamp.template_cutout"><code class="docutils literal notranslate"><span class="pre">Substamp.template_cutout</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.Substamp.noise_variance_cutout"><code class="docutils literal notranslate"><span class="pre">Substamp.noise_variance_cutout</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.Substamp.fit_results"><code class="docutils literal notranslate"><span class="pre">Substamp.fit_results</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.Substamp.local_kernel_solution"><code class="docutils literal notranslate"><span class="pre">Substamp.local_kernel_solution</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.Substamp.convolved_model_local"><code class="docutils literal notranslate"><span class="pre">Substamp.convolved_model_local</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.Substamp.convolved_model_global"><code class="docutils literal notranslate"><span class="pre">Substamp.convolved_model_global</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.Substamp.basis_vectors"><code class="docutils literal notranslate"><span class="pre">Substamp.basis_vectors</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#hotpants.models.SubstampStatus"><code class="docutils literal notranslate"><span class="pre">SubstampStatus</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.SubstampStatus.FOUND"><code class="docutils literal notranslate"><span class="pre">SubstampStatus.FOUND</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.SubstampStatus.PASSED_FOM_CHECK"><code class="docutils literal notranslate"><span class="pre">SubstampStatus.PASSED_FOM_CHECK</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.SubstampStatus.REJECTED_FOM_CHECK"><code class="docutils literal notranslate"><span class="pre">SubstampStatus.REJECTED_FOM_CHECK</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.SubstampStatus.REJECTED_ITERATIVE_FIT"><code class="docutils literal notranslate"><span class="pre">SubstampStatus.REJECTED_ITERATIVE_FIT</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.models.SubstampStatus.USED_IN_FINAL_FIT"><code class="docutils literal notranslate"><span class="pre">SubstampStatus.USED_IN_FINAL_FIT</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
 </ul>
 
         </div>
@@ -75,6 +101,200 @@
   <section id="the-substamp-class">
 <span id="substamp-reference"></span><h1>The Substamp Class<a class="headerlink" href="#the-substamp-class" title="Link to this heading"></a></h1>
 <p>The <code class="docutils literal notranslate"><span class="pre">Substamp</span></code> class is a data container that holds all information about a single substamp used for kernel fitting.</p>
+<p id="module-hotpants.models">Data models for the HOTPANTS wrapper.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="hotpants.models.Substamp">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">hotpants.models.</span></span><span class="sig-name descname"><span class="pre">Substamp</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">substamp_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stamp_group_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">x</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">y</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#hotpants.models.Substamp" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Data class to hold all information about a single substamp.</p>
+<p>A substamp is a small cutout of an image centered on a bright, isolated
+star, used to model the convolution kernel. This class tracks the data
+and status of each substamp throughout the pipeline.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.Substamp.id">
+<span class="sig-name descname"><span class="pre">id</span></span><a class="headerlink" href="#hotpants.models.Substamp.id" title="Link to this definition"></a></dt>
+<dd><p>A unique identifier for the substamp.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.Substamp.stamp_group_id">
+<span class="sig-name descname"><span class="pre">stamp_group_id</span></span><a class="headerlink" href="#hotpants.models.Substamp.stamp_group_id" title="Link to this definition"></a></dt>
+<dd><p>The identifier for the parent stamp region.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.Substamp.x">
+<span class="sig-name descname"><span class="pre">x</span></span><a class="headerlink" href="#hotpants.models.Substamp.x" title="Link to this definition"></a></dt>
+<dd><p>The x-coordinate of the substamp center.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.Substamp.y">
+<span class="sig-name descname"><span class="pre">y</span></span><a class="headerlink" href="#hotpants.models.Substamp.y" title="Link to this definition"></a></dt>
+<dd><p>The y-coordinate of the substamp center.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.Substamp.status">
+<span class="sig-name descname"><span class="pre">status</span></span><a class="headerlink" href="#hotpants.models.Substamp.status" title="Link to this definition"></a></dt>
+<dd><p>The current processing status of the substamp.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#hotpants.models.SubstampStatus" title="hotpants.models.SubstampStatus">SubstampStatus</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.Substamp.image_cutout">
+<span class="sig-name descname"><span class="pre">image_cutout</span></span><a class="headerlink" href="#hotpants.models.Substamp.image_cutout" title="Link to this definition"></a></dt>
+<dd><p>The pixel data from the science image.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.Substamp.template_cutout">
+<span class="sig-name descname"><span class="pre">template_cutout</span></span><a class="headerlink" href="#hotpants.models.Substamp.template_cutout" title="Link to this definition"></a></dt>
+<dd><p>The pixel data from the template image.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.Substamp.noise_variance_cutout">
+<span class="sig-name descname"><span class="pre">noise_variance_cutout</span></span><a class="headerlink" href="#hotpants.models.Substamp.noise_variance_cutout" title="Link to this definition"></a></dt>
+<dd><p>The noise variance in the cutout region.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.Substamp.fit_results">
+<span class="sig-name descname"><span class="pre">fit_results</span></span><a class="headerlink" href="#hotpants.models.Substamp.fit_results" title="Link to this definition"></a></dt>
+<dd><p>A dictionary containing results from local fits.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.Substamp.local_kernel_solution">
+<span class="sig-name descname"><span class="pre">local_kernel_solution</span></span><a class="headerlink" href="#hotpants.models.Substamp.local_kernel_solution" title="Link to this definition"></a></dt>
+<dd><p>The kernel solution coefficients
+derived from this substamp alone.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.Substamp.convolved_model_local">
+<span class="sig-name descname"><span class="pre">convolved_model_local</span></span><a class="headerlink" href="#hotpants.models.Substamp.convolved_model_local" title="Link to this definition"></a></dt>
+<dd><p>The convolved model of this
+substamp using its local solution.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.Substamp.convolved_model_global">
+<span class="sig-name descname"><span class="pre">convolved_model_global</span></span><a class="headerlink" href="#hotpants.models.Substamp.convolved_model_global" title="Link to this definition"></a></dt>
+<dd><p>The convolved model of this
+substamp using the final global solution.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.Substamp.basis_vectors">
+<span class="sig-name descname"><span class="pre">basis_vectors</span></span><a class="headerlink" href="#hotpants.models.Substamp.basis_vectors" title="Link to this definition"></a></dt>
+<dd><p>A 3D array representing the kernel basis
+functions convolved with the image data at this location. This is
+the core component for the linear fit, as described in the Alard &amp;
+Lupton (1998) paper. Each 2D slice of this array is one of the
+Gaussian-Laguerre basis functions convolved with the local image
+data, forming the design matrix for the least-squares fit.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="hotpants.models.SubstampStatus">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">hotpants.models.</span></span><span class="sig-name descname"><span class="pre">SubstampStatus</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">values</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#hotpants.models.SubstampStatus" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Enum</span></code></p>
+<p>Enumeration for the status of a substamp during the fitting process.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.SubstampStatus.FOUND">
+<span class="sig-name descname"><span class="pre">FOUND</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">1</span></em><a class="headerlink" href="#hotpants.models.SubstampStatus.FOUND" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.SubstampStatus.PASSED_FOM_CHECK">
+<span class="sig-name descname"><span class="pre">PASSED_FOM_CHECK</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">2</span></em><a class="headerlink" href="#hotpants.models.SubstampStatus.PASSED_FOM_CHECK" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.SubstampStatus.REJECTED_FOM_CHECK">
+<span class="sig-name descname"><span class="pre">REJECTED_FOM_CHECK</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">3</span></em><a class="headerlink" href="#hotpants.models.SubstampStatus.REJECTED_FOM_CHECK" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.SubstampStatus.REJECTED_ITERATIVE_FIT">
+<span class="sig-name descname"><span class="pre">REJECTED_ITERATIVE_FIT</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">5</span></em><a class="headerlink" href="#hotpants.models.SubstampStatus.REJECTED_ITERATIVE_FIT" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.models.SubstampStatus.USED_IN_FINAL_FIT">
+<span class="sig-name descname"><span class="pre">USED_IN_FINAL_FIT</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">4</span></em><a class="headerlink" href="#hotpants.models.SubstampStatus.USED_IN_FINAL_FIT" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
 </section>
 
 
