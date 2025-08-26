@@ -37,3 +37,4 @@ jobs:
           github_token: ${{ secrets.ACTION_TOKEN }}
           publish_branch: gh-pages
           publish_dir: docs/build/
+          cname: zoutei.github.io
