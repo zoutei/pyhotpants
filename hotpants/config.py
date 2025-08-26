@@ -64,6 +64,22 @@ class HotpantsConfig:
         sigma_image_file (str): Path to save the sigma (difference/noise) FITS image. (Default: None).
         stamp_region_file (str): Path to save the DS9 region file of stamps. (Default: None).
 
+        Kernel composition parameters
+        -----------------------------
+        The following parameters control how the convolution kernel is constructed
+        from a sum of Gaussians. They mirror the `-ng` style flags in the
+        original HOTPANTS tool and are passed through to the C layer where the
+        kernel basis is built.
+
+        ngauss (int): Number of Gaussian components which compose the kernel.
+            Defaults to 3. Each Gaussian has an associated polynomial degree and
+            a sigma (width) value.
+        deg_fixe (List[int]): Polynomial degrees associated with each Gaussian
+            component. Length should equal `ngauss`. Default: [6, 4, 2]. Each
+            entry is the maximum polynomial degree for that Gaussian basis.
+        sigma_gauss (List[float]): Widths (sigma) of each Gaussian component in
+            pixels. Length should equal `ngauss`. Default: [0.7, 1.5, 3.0].
+
         Note:
             The following parameters from the original HOTPANTS are not implemented in this wrapper:
             - `scale_fitthresh` (-sft): Logic to scale `fitthresh` is not used.
