@@ -5,6 +5,7 @@ Configuration module for the HOTPANTS wrapper.
 
 from typing import Dict, Any
 
+
 class HotpantsConfig:
     """
     Configuration class for HOTPANTS parameters.
@@ -53,7 +54,7 @@ class HotpantsConfig:
         fillval_noise (float): Value for invalid pixels in the noise image. (Default: 0.0).
         rescale_ok (bool): If True, rescale noise for 'OK' pixels. (Default: False).
         conv_var (bool): If True, convolve variance instead of noise. (Default: False).
-        use_pca (bool): If True, use PCA to model the kernel basis (not fully supported). (Default: False).
+        use_pca (bool): If True, use PCA to model the kernel basis. (Default: False).
         nstampx (int): Number of stamps to place in the x-direction per region. (Default: 10).
         nstampy (int): Number of stamps to place in the y-direction per region. (Default: 10).
         output_file (str): Path to save the difference FITS image. (Default: None).
@@ -128,8 +129,8 @@ class HotpantsConfig:
         self.kf_spread_mask1 = kwargs.get("kf_spread_mask1", 1.0)
 
         # General and miscellaneous
-        # [-v] verbosity    : level of verbosity, 0-2 (1)
-        self.verbose = kwargs.get("verbose", 1)
+        # [-v] verbosity    : level of verbosity, 0-2 (0)
+        self.verbose = kwargs.get("verbose", 0)
         # [-c  toconvolve]  : force convolution on (t)emplate or (i)mage (undef)
         self.force_convolve = kwargs.get("force_convolve", "b")
         # [-n  normalize]   : normalize to (t)emplate, (i)mage, or (u)nconvolved (t)
