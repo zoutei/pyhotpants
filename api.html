@@ -44,7 +44,22 @@
         </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
               <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
 <ul class="current">
-<li class="toctree-l1 current"><a class="current reference internal" href="#">API Reference</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#hotpants.hotpants.Hotpants"><code class="docutils literal notranslate"><span class="pre">Hotpants</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.hotpants.Hotpants.convolve_and_difference"><code class="docutils literal notranslate"><span class="pre">Hotpants.convolve_and_difference()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.hotpants.Hotpants.find_stamps"><code class="docutils literal notranslate"><span class="pre">Hotpants.find_stamps()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.hotpants.Hotpants.fit_and_select_direction"><code class="docutils literal notranslate"><span class="pre">Hotpants.fit_and_select_direction()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.hotpants.Hotpants.get_final_outputs"><code class="docutils literal notranslate"><span class="pre">Hotpants.get_final_outputs()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.hotpants.Hotpants.get_substamp_details"><code class="docutils literal notranslate"><span class="pre">Hotpants.get_substamp_details()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.hotpants.Hotpants.iterative_fit_and_clip"><code class="docutils literal notranslate"><span class="pre">Hotpants.iterative_fit_and_clip()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.hotpants.Hotpants.run_pipeline"><code class="docutils literal notranslate"><span class="pre">Hotpants.run_pipeline()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.hotpants.Hotpants.save_outputs"><code class="docutils literal notranslate"><span class="pre">Hotpants.save_outputs()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.hotpants.Hotpants.visualize_kernel"><code class="docutils literal notranslate"><span class="pre">Hotpants.visualize_kernel()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#hotpants.hotpants.HotpantsError"><code class="docutils literal notranslate"><span class="pre">HotpantsError</span></code></a></li>
+</ul>
+</li>
 <li class="toctree-l1"><a class="reference internal" href="config.html">Configuration Reference</a></li>
 <li class="toctree-l1"><a class="reference internal" href="models.html">The Substamp Class</a></li>
 </ul>
@@ -76,6 +91,221 @@
   <section id="api-reference">
 <h1>API Reference<a class="headerlink" href="#api-reference" title="Link to this heading"></a></h1>
 <p>This is the API reference for the <code class="docutils literal notranslate"><span class="pre">hotpants</span></code> module.</p>
+<p id="module-hotpants.hotpants">HOTPANTS Python Wrapper - Modular Implementation</p>
+<p>This module provides a complete Python interface to the HOTPANTS image differencing
+algorithms. Each step of the pipeline is exposed as an individual method for
+fine-grained control.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="hotpants.hotpants.Hotpants">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">hotpants.hotpants.</span></span><span class="sig-name descname"><span class="pre">Hotpants</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">template_data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">image_data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">t_mask</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">i_mask</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">t_error</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">i_error</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">star_catalog</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">config</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="config.html#hotpants.config.HotpantsConfig" title="hotpants.config.HotpantsConfig"><span class="pre">HotpantsConfig</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_header</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Header</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#hotpants.hotpants.Hotpants" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>The central HOTPANTS object for stateful image differencing.</p>
+<p>This class orchestrates the entire image subtraction pipeline. It holds the
+input data, configuration, and intermediate results. The public methods
+correspond to the major steps of the pipeline, allowing for either a full
+end-to-end run or step-by-step execution for detailed analysis.</p>
+<p class="rubric">Example</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">hotpants</span><span class="w"> </span><span class="kn">import</span> <span class="n">Hotpants</span><span class="p">,</span> <span class="n">HotpantsConfig</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># Create a custom configuration</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">config</span> <span class="o">=</span> <span class="n">HotpantsConfig</span><span class="p">(</span><span class="n">rkernel</span><span class="o">=</span><span class="mi">15</span><span class="p">,</span> <span class="n">normalize</span><span class="o">=</span><span class="s1">&#39;i&#39;</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># Initialize with FITS file paths</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">hp</span> <span class="o">=</span> <span class="n">Hotpants</span><span class="p">(</span><span class="s1">&#39;template.fits&#39;</span><span class="p">,</span> <span class="s1">&#39;science.fits&#39;</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># Run the entire pipeline</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">results</span> <span class="o">=</span> <span class="n">hp</span><span class="o">.</span><span class="n">run_pipeline</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># Access the difference image</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">diff_image</span> <span class="o">=</span> <span class="n">results</span><span class="p">[</span><span class="s1">&#39;diff_image&#39;</span><span class="p">]</span>
+</pre></div>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="hotpants.hotpants.Hotpants.convolve_and_difference">
+<span class="sig-name descname"><span class="pre">convolve_and_difference</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ndarray</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#hotpants.hotpants.Hotpants.convolve_and_difference" title="Link to this definition"></a></dt>
+<dd><p>Step 4: Applies the kernel, performs subtraction, and creates final images.</p>
+<p>This method uses the global kernel solution to convolve the appropriate
+image. It then subtracts the convolved image from the target image to
+produce the difference image and calculates the corresponding final
+noise image and output mask.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><ul class="simple">
+<li><p>diff_image (np.ndarray): The raw difference image (Target - Convolved Model).</p></li>
+<li><p>convolved_image (np.ndarray): The image that was convolved to match the other.</p></li>
+<li><p>noise_image (np.ndarray): The final 1-sigma noise map for the difference image.</p></li>
+<li><p>output_mask (np.ndarray): The final integer mask indicating bad pixels.</p></li>
+</ul>
+</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>A tuple containing</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hotpants.hotpants.Hotpants.find_stamps">
+<span class="sig-name descname"><span class="pre">find_stamps</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="models.html#hotpants.models.Substamp" title="hotpants.models.Substamp"><span class="pre">Substamp</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="models.html#hotpants.models.Substamp" title="hotpants.models.Substamp"><span class="pre">Substamp</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#hotpants.hotpants.Hotpants.find_stamps" title="Link to this definition"></a></dt>
+<dd><p>Step 1: Finds potential substamp coordinates for kernel fitting.</p>
+<p>This method scans the template and science images for suitable stars
+to use for constructing the convolution kernel. If a <cite>star_catalog</cite> was
+provided during initialization, this catalog is used directly,
+bypassing the automated search. Otherwise, a grid-based search is
+performed to find bright, isolated stars.</p>
+<p>It populates the <cite>template_substamps</cite> and <cite>image_substamps</cite> lists with
+<cite>Substamp</cite> objects, which initially contain only coordinate information.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>the <cite>Substamp</cite> objects found on the
+template and the <cite>Substamp</cite> objects found on the science image.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>A tuple containing two lists</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hotpants.hotpants.Hotpants.fit_and_select_direction">
+<span class="sig-name descname"><span class="pre">fit_and_select_direction</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#hotpants.hotpants.Hotpants.fit_and_select_direction" title="Link to this definition"></a></dt>
+<dd><p>Step 2: Performs initial fits and selects the best convolution direction.</p>
+<p>This method performs a localized fit for every potential substamp found
+in the previous step. A figure-of-merit (FOM) is calculated for each
+substamp to assess its quality. Stamps that are saturated, near bad
+pixels, or have a poor local fit (high chi-squared) are rejected.</p>
+<p>The aggregate FOM is then used to decide whether it is better to
+convolve the template to match the science image or vice-versa. The
+status of each <cite>Substamp</cite> is updated to either <cite>PASSED_FOM_CHECK</cite> or
+<cite>REJECTED_FOM_CHECK</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The selected convolution direction, either ‘t’ (template) or ‘i’ (image).</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hotpants.hotpants.Hotpants.get_final_outputs">
+<span class="sig-name descname"><span class="pre">get_final_outputs</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#hotpants.hotpants.Hotpants.get_final_outputs" title="Link to this definition"></a></dt>
+<dd><p>Step 5: Applies final masks, calculates statistics, and returns all products.</p>
+<p>This is the final data-producing step. It applies fill values to masked
+pixels in the output images and calculates final image statistics.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><ul class="simple">
+<li><p>‘diff_image’: The final, masked difference image.</p></li>
+<li><p>’convolved_image’: The final, masked convolved image.</p></li>
+<li><p>’noise_image’: The final, masked noise image.</p></li>
+<li><p>’output_mask’: The final integer mask.</p></li>
+<li><p>’stats’: A dictionary of final image statistics.</p></li>
+<li><p>’conv_direction’: The convolution direction (‘t’ or ‘i’).</p></li>
+<li><p>’kernel_solution’: The global kernel solution coefficients.</p></li>
+</ul>
+</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>A dictionary containing all final data products, including</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hotpants.hotpants.Hotpants.get_substamp_details">
+<span class="sig-name descname"><span class="pre">get_substamp_details</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#hotpants.hotpants.Hotpants.get_substamp_details" title="Link to this definition"></a></dt>
+<dd><p>Returns the complete, stateful master lists of all substamps.</p>
+<p>This is a diagnostic method to inspect the properties and final status
+of every substamp considered during the pipeline run.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A dictionary containing the full lists of <cite>template_substamps</cite> and
+<cite>image_substamps</cite>.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hotpants.hotpants.Hotpants.iterative_fit_and_clip">
+<span class="sig-name descname"><span class="pre">iterative_fit_and_clip</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="models.html#hotpants.models.Substamp" title="hotpants.models.Substamp"><span class="pre">Substamp</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#hotpants.hotpants.Hotpants.iterative_fit_and_clip" title="Link to this definition"></a></dt>
+<dd><p>Step 3: Solves for the global kernel using iterative sigma-clipping.</p>
+<p>This method takes all substamps that passed the FOM check and uses them
+to derive a single, spatially varying kernel solution for the entire
+image. It iteratively rejects outlier substamps to achieve a robust fit.
+The status of the substamps is updated to either <cite>USED_IN_FINAL_FIT</cite> or
+<cite>REJECTED_ITERATIVE_FIT</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><ul class="simple">
+<li><p>The global kernel solution as a 1D NumPy array of coefficients.</p></li>
+<li><p>A list of the <cite>Substamp</cite> objects that survived the clipping and
+were used in the final fit.</p></li>
+</ul>
+</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>A tuple containing</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hotpants.hotpants.Hotpants.run_pipeline">
+<span class="sig-name descname"><span class="pre">run_pipeline</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#hotpants.hotpants.Hotpants.run_pipeline" title="Link to this definition"></a></dt>
+<dd><p>A convenience method to run the entire pipeline in a single call.</p>
+<p>This executes all steps from stamp finding to final output generation
+and saves any configured output files.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A dictionary containing all final data products, as returned by
+<cite>get_final_outputs</cite>. This includes the final difference image,
+noise map, mask, and statistics.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hotpants.hotpants.Hotpants.save_outputs">
+<span class="sig-name descname"><span class="pre">save_outputs</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#hotpants.hotpants.Hotpants.save_outputs" title="Link to this definition"></a></dt>
+<dd><p>Saves all configured output files (FITS images and region files).</p>
+<p>This method checks the <cite>HotpantsConfig</cite> object for any specified output
+filenames and writes the corresponding files. This includes the main
+difference image, noise image, mask, and the diagnostic DS9 region file
+for the kernel fitting stamps.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hotpants.hotpants.Hotpants.visualize_kernel">
+<span class="sig-name descname"><span class="pre">visualize_kernel</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">at_coords</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">size_factor</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">2.0</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">ndarray</span></span></span><a class="headerlink" href="#hotpants.hotpants.Hotpants.visualize_kernel" title="Link to this definition"></a></dt>
+<dd><p>Generates an image of the convolution kernel at a specific coordinate.</p>
+<p>This method should be called <em>after</em> the pipeline has run and a
+kernel solution has been found. It uses the final kernel solution to
+reconstruct the kernel for the given (x, y) location.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>at_coords</strong> – The (x, y) coordinates at which to visualize the kernel.</p></li>
+<li><p><strong>size_factor</strong> – A multiplier for the kernel’s width to
+determine the output image size. Defaults to 2.0.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>A 2D NumPy array containing the image of the kernel.</p>
+</dd>
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><a class="reference internal" href="#hotpants.hotpants.HotpantsError" title="hotpants.hotpants.HotpantsError"><strong>HotpantsError</strong></a> – If the kernel fitting has not been run yet.</p></li>
+<li><p><strong>TypeError</strong> – If at_coords is not a tuple of two integers.</p></li>
+<li><p><strong>ValueError</strong> – If size_factor is not a positive number.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py exception">
+<dt class="sig sig-object py" id="hotpants.hotpants.HotpantsError">
+<em class="property"><span class="k"><span class="pre">exception</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">hotpants.hotpants.</span></span><span class="sig-name descname"><span class="pre">HotpantsError</span></span><a class="headerlink" href="#hotpants.hotpants.HotpantsError" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Exception</span></code></p>
+<p>Exception raised for HOTPANTS-specific errors.</p>
+</dd></dl>
+
 </section>
 
 

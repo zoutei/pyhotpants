@@ -45,7 +45,53 @@
               <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
 <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a></li>
-<li class="toctree-l1 current"><a class="current reference internal" href="#">Configuration Reference</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Configuration Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#hotpants.config.HotpantsConfig"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.tuthresh"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.tuthresh</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.tuktresh"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.tuktresh</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.tlthresh"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.tlthresh</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.tgain"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.tgain</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.trdnoise"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.trdnoise</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.tpedestal"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.tpedestal</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.iuthresh"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.iuthresh</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.iuktresh"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.iuktresh</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.ilthresh"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.ilthresh</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.igain"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.igain</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.irdnoise"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.irdnoise</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.ipedestal"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.ipedestal</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.rkernel"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.rkernel</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.ko"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.ko</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.bgo"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.bgo</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.fitthresh"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.fitthresh</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.nss"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.nss</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.rss"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.rss</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.ks"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.ks</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.kfm"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.kfm</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.stat_sig"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.stat_sig</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.kf_spread_mask1"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.kf_spread_mask1</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.verbose"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.verbose</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.force_convolve"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.force_convolve</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.normalize"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.normalize</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.fom"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.fom</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.fillval"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.fillval</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.fillval_noise"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.fillval_noise</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.rescale_ok"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.rescale_ok</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.conv_var"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.conv_var</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.use_pca"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.use_pca</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.nstampx"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.nstampx</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.nstampy"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.nstampy</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.output_file"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.output_file</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.noise_image_file"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.noise_image_file</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.mask_image_file"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.mask_image_file</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.convolved_image_file"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.convolved_image_file</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.sigma_image_file"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.sigma_image_file</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.stamp_region_file"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.stamp_region_file</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.Note"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.Note</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.to_dict"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.to_dict()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
 <li class="toctree-l1"><a class="reference internal" href="models.html">The Substamp Class</a></li>
 </ul>
 
@@ -76,6 +122,467 @@
   <section id="configuration-reference">
 <span id="config-reference"></span><h1>Configuration Reference<a class="headerlink" href="#configuration-reference" title="Link to this heading"></a></h1>
 <p>This page details all the tunable parameters for the HOTPANTS algorithm, which are managed through the <code class="docutils literal notranslate"><span class="pre">HotpantsConfig</span></code> class.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">hotpants.config.</span></span><span class="sig-name descname"><span class="pre">HotpantsConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#hotpants.config.HotpantsConfig" title="Link to this definition"></a></dt>
+<dd><p>Configuration class for HOTPANTS parameters.</p>
+<p>This class holds all the tunable parameters for the HOTPANTS algorithm,
+mirroring the command-line flags of the original C implementation. Default
+values are set to match the original code.</p>
+<p>An instance of this class is created by the Hotpants object, but a custom,
+pre-configured instance can also be passed during initialization.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.tuthresh">
+<span class="sig-name descname"><span class="pre">tuthresh</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.tuthresh" title="Link to this definition"></a></dt>
+<dd><p>Upper valid data count for the template.
+(Default: dynamically set to max value).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.tuktresh">
+<span class="sig-name descname"><span class="pre">tuktresh</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.tuktresh" title="Link to this definition"></a></dt>
+<dd><p>Upper valid data count for kernel fitting on the template.
+(Default: Same as tuthresh).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.tlthresh">
+<span class="sig-name descname"><span class="pre">tlthresh</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.tlthresh" title="Link to this definition"></a></dt>
+<dd><p>Lower valid data count for the template.
+(Default: dynamically set to min value).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.tgain">
+<span class="sig-name descname"><span class="pre">tgain</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.tgain" title="Link to this definition"></a></dt>
+<dd><p>Gain in template (e-/ADU). (Default: 1.0).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.trdnoise">
+<span class="sig-name descname"><span class="pre">trdnoise</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.trdnoise" title="Link to this definition"></a></dt>
+<dd><p>Read noise in template (e-). (Default: 0.0).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.tpedestal">
+<span class="sig-name descname"><span class="pre">tpedestal</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.tpedestal" title="Link to this definition"></a></dt>
+<dd><p>ADU pedestal in template. (Default: 0.0).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.iuthresh">
+<span class="sig-name descname"><span class="pre">iuthresh</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.iuthresh" title="Link to this definition"></a></dt>
+<dd><p>Upper valid data count for the image.
+(Default: dynamically set to max value).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.iuktresh">
+<span class="sig-name descname"><span class="pre">iuktresh</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.iuktresh" title="Link to this definition"></a></dt>
+<dd><p>Upper valid data count for kernel fitting on the image.
+(Default: Same as iuthresh).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.ilthresh">
+<span class="sig-name descname"><span class="pre">ilthresh</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.ilthresh" title="Link to this definition"></a></dt>
+<dd><p>Lower valid data count for the image.
+(Default: dynamically set to min value).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.igain">
+<span class="sig-name descname"><span class="pre">igain</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.igain" title="Link to this definition"></a></dt>
+<dd><p>Gain in image (e-/ADU). (Default: 1.0).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.irdnoise">
+<span class="sig-name descname"><span class="pre">irdnoise</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.irdnoise" title="Link to this definition"></a></dt>
+<dd><p>Read noise in image (e-). (Default: 0.0).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.ipedestal">
+<span class="sig-name descname"><span class="pre">ipedestal</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.ipedestal" title="Link to this definition"></a></dt>
+<dd><p>ADU pedestal in image. (Default: 0.0).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.rkernel">
+<span class="sig-name descname"><span class="pre">rkernel</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.rkernel" title="Link to this definition"></a></dt>
+<dd><p>Convolution kernel half-width in pixels. (Default: 10).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.ko">
+<span class="sig-name descname"><span class="pre">ko</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.ko" title="Link to this definition"></a></dt>
+<dd><p>Spatial order of kernel variation within a region. (Default: 2).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.bgo">
+<span class="sig-name descname"><span class="pre">bgo</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.bgo" title="Link to this definition"></a></dt>
+<dd><p>Spatial order of background variation within a region. (Default: 1).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.fitthresh">
+<span class="sig-name descname"><span class="pre">fitthresh</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.fitthresh" title="Link to this definition"></a></dt>
+<dd><p>RMS threshold for good centroids in kernel fit. (Default: 20.0).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.nss">
+<span class="sig-name descname"><span class="pre">nss</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.nss" title="Link to this definition"></a></dt>
+<dd><p>Number of centroids (sub-stamps) to use for each stamp. (Default: 3).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.rss">
+<span class="sig-name descname"><span class="pre">rss</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.rss" title="Link to this definition"></a></dt>
+<dd><p>Half-width of sub-stamps to extract around each centroid. (Default: 15).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.ks">
+<span class="sig-name descname"><span class="pre">ks</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.ks" title="Link to this definition"></a></dt>
+<dd><p>High sigma rejection for bad stamps in the kernel fit. (Default: 2.0).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.kfm">
+<span class="sig-name descname"><span class="pre">kfm</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.kfm" title="Link to this definition"></a></dt>
+<dd><p>Fraction of absolute kernel sum for a pixel to be considered ‘OK’. (Default: 0.990).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.stat_sig">
+<span class="sig-name descname"><span class="pre">stat_sig</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.stat_sig" title="Link to this definition"></a></dt>
+<dd><p>Threshold for sigma clipping statistics. (Default: 3.0).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.kf_spread_mask1">
+<span class="sig-name descname"><span class="pre">kf_spread_mask1</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.kf_spread_mask1" title="Link to this definition"></a></dt>
+<dd><p>Fraction of kernel half-width to spread input masks by. (Default: 1.0).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.verbose">
+<span class="sig-name descname"><span class="pre">verbose</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.verbose" title="Link to this definition"></a></dt>
+<dd><p>Level of verbosity, 0-2. (Default: 1).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.force_convolve">
+<span class="sig-name descname"><span class="pre">force_convolve</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.force_convolve" title="Link to this definition"></a></dt>
+<dd><p>Force convolution on ‘t’ (template) or ‘i’ (image). ‘b’ for best. (Default: ‘b’).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.normalize">
+<span class="sig-name descname"><span class="pre">normalize</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.normalize" title="Link to this definition"></a></dt>
+<dd><p>Normalize to ‘t’ (template), ‘i’ (image), or ‘u’ (unconvolved). (Default: ‘t’).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.fom">
+<span class="sig-name descname"><span class="pre">fom</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.fom" title="Link to this definition"></a></dt>
+<dd><p>Figure-of-merit for choosing convolution direction: ‘v’ (variance), ‘s’ (sigma), or ‘h’ (histogram). (Default: ‘v’).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.fillval">
+<span class="sig-name descname"><span class="pre">fillval</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.fillval" title="Link to this definition"></a></dt>
+<dd><p>Value for invalid (bad) pixels in the difference image. (Default: 1.0e-30).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.fillval_noise">
+<span class="sig-name descname"><span class="pre">fillval_noise</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.fillval_noise" title="Link to this definition"></a></dt>
+<dd><p>Value for invalid pixels in the noise image. (Default: 0.0).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.rescale_ok">
+<span class="sig-name descname"><span class="pre">rescale_ok</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.rescale_ok" title="Link to this definition"></a></dt>
+<dd><p>If True, rescale noise for ‘OK’ pixels. (Default: False).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.conv_var">
+<span class="sig-name descname"><span class="pre">conv_var</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.conv_var" title="Link to this definition"></a></dt>
+<dd><p>If True, convolve variance instead of noise. (Default: False).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.use_pca">
+<span class="sig-name descname"><span class="pre">use_pca</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.use_pca" title="Link to this definition"></a></dt>
+<dd><p>If True, use PCA to model the kernel basis. (Default: False).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.nstampx">
+<span class="sig-name descname"><span class="pre">nstampx</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.nstampx" title="Link to this definition"></a></dt>
+<dd><p>Number of stamps to place in the x-direction per region. (Default: 10).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.nstampy">
+<span class="sig-name descname"><span class="pre">nstampy</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.nstampy" title="Link to this definition"></a></dt>
+<dd><p>Number of stamps to place in the y-direction per region. (Default: 10).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.output_file">
+<span class="sig-name descname"><span class="pre">output_file</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.output_file" title="Link to this definition"></a></dt>
+<dd><p>Path to save the difference FITS image. (Default: None).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.noise_image_file">
+<span class="sig-name descname"><span class="pre">noise_image_file</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.noise_image_file" title="Link to this definition"></a></dt>
+<dd><p>Path to save the noise FITS image. (Default: None).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.mask_image_file">
+<span class="sig-name descname"><span class="pre">mask_image_file</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.mask_image_file" title="Link to this definition"></a></dt>
+<dd><p>Path to save the mask FITS image. (Default: None).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.convolved_image_file">
+<span class="sig-name descname"><span class="pre">convolved_image_file</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.convolved_image_file" title="Link to this definition"></a></dt>
+<dd><p>Path to save the convolved FITS image. (Default: None).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.sigma_image_file">
+<span class="sig-name descname"><span class="pre">sigma_image_file</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.sigma_image_file" title="Link to this definition"></a></dt>
+<dd><p>Path to save the sigma (difference/noise) FITS image. (Default: None).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.stamp_region_file">
+<span class="sig-name descname"><span class="pre">stamp_region_file</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.stamp_region_file" title="Link to this definition"></a></dt>
+<dd><p>Path to save the DS9 region file of stamps. (Default: None).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.Note">
+<span class="sig-name descname"><span class="pre">Note</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.Note" title="Link to this definition"></a></dt>
+<dd><p>The following parameters from the original HOTPANTS are not implemented in this wrapper:
+- <cite>scale_fitthresh</cite> (-sft): Logic to scale <cite>fitthresh</cite> is not used.
+- <cite>min_frac_stamps</cite> (-nft): Check for minimum fraction of filled stamps is not used.
+- <cite>nregx</cite> and <cite>nregy</cite>: The wrapper treats the entire image as a single region, so these are fixed to 1.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.to_dict">
+<span class="sig-name descname"><span class="pre">to_dict</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.to_dict" title="Link to this definition"></a></dt>
+<dd><p>Convert config to a dictionary for passing to the C extension.</p>
+</dd></dl>
+
+</dd></dl>
+
 </section>
 
 
