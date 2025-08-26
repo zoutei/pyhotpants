@@ -337,29 +337,29 @@ void fitKernel(hotpants_state_t *state, stamp_struct *stamps, float *imRef, floa
     
     
     
-    if (state->verbose>=2) fprintf(stderr, " Expanding Matrix For Full Fit\n");
+    if (state->verbose>=1) fprintf(stderr, " Expanding Matrix For Full Fit\n");
     build_matrix(state, stamps, state->nS, matrix);
     build_scprod(state, stamps, state->nS, imRef, kernelSol);
     
     ludcmp(matrix, mat_size, state->indx, &d);
     lubksb(matrix, mat_size, state->indx, kernelSol);
     
-    if (state->verbose>=2) fprintf(stderr, " Checking again\n");
+    if (state->verbose>=1) fprintf(stderr, " Checking again\n");
     check = check_again(state, stamps, kernelSol, imConv, imRef, imNoise, meansigSubstamps, scatterSubstamps, NskippedSubstamps);
     
     while(check) {
         
-        fprintf(stderr, "\n Re-Expanding Matrix\n");
+        if (state->verbose>=1) fprintf(stderr, "\n Re-Expanding Matrix\n");
         build_matrix(state, stamps, state->nS, matrix);
         build_scprod(state, stamps, state->nS, imRef, kernelSol);
         
         ludcmp(matrix, mat_size, state->indx, &d);
         lubksb(matrix, mat_size, state->indx, kernelSol);
         
-        fprintf(stderr, " Checking again\n");          
+        if (state->verbose>=1) fprintf(stderr, " Checking again\n");          
         check = check_again(state, stamps, kernelSol, imConv, imRef, imNoise, meansigSubstamps, scatterSubstamps, NskippedSubstamps); 
     }
-    fprintf(stderr, " Sigma clipping of bad stamps converged, kernel determined\n");
+    if (state->verbose>=1) fprintf(stderr, " Sigma clipping of bad stamps converged, kernel determined\n");
     
     for (i = 0; i <= mat_size; i++)
         free(matrix[i]);
@@ -1082,8 +1082,8 @@ char check_again(hotpants_state_t *state, stamp_struct *stamps, double *kernelSo
     }
     
     sigma_clip(state, ss, nss, &mean, &stdev, 10);
-    fprintf(stderr, "    Mean sig: %6.3f stdev: %6.3f\n", mean, stdev);
-    fprintf(stderr, "    Iterating through stamps with sig > %.3f\n", mean + state->kerSigReject * stdev);
+    if (state->verbose>=1) fprintf(stderr, "    Mean sig: %6.3f stdev: %6.3f\n", mean, stdev);
+    if (state->verbose>=1) fprintf(stderr, "    Iterating through stamps with sig > %.3f\n", mean + state->kerSigReject * stdev);
     
     /* save the mean and scatter so that it can be saved in the fits header */
     (*meansigSubstamps)=mean;
@@ -1113,9 +1113,9 @@ char check_again(hotpants_state_t *state, stamp_struct *stamps, double *kernelSo
                 scnt += 1;
         }
     }
-    
-    fprintf(stderr, "    %d out of %d stamps remain\n", scnt, state->nS);
-    
+
+    if (state->verbose>=1) fprintf(stderr, "    %d out of %d stamps remain\n", scnt, state->nS);
+
     free(ss);
     return check;
 }
