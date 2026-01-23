@@ -26,7 +26,7 @@ void loadxyfile(hotpants_state_t *state, char *filename, int cmpfileflag){
     int Nalloc,c;
     char line[SCRLEN];
     xyfile   = fopen(filename, "r");
-    fprintf(stderr, "WARNING : INPUT FORMAT HARDCODED : X=1, Y=2; 1-indexed coordinates\n");
+    if (state->verbose > 0) fprintf(stderr, "WARNING : INPUT FORMAT HARDCODED : X=1, Y=2; 1-indexed coordinates\n");
     if (cmpfileflag) {
         for (;;){
             c=getc(xyfile);
@@ -187,7 +187,7 @@ void buildStamps(hotpants_state_t *state, int sXMin, int sXMax, int sYMin, int s
     float *refArea=NULL;
     double check;
     
-    if (state->verbose >= 1)
+    if (state->verbose >= 2)
         fprintf(stderr, "    Stamp in region : %d:%d,%d:%d\n",
                 sXMin, sXMax, sYMin, sYMax);
     
@@ -209,7 +209,7 @@ void buildStamps(hotpants_state_t *state, int sXMin, int sXMax, int sYMin, int s
                                    &ctStamps[*ntS].mode, &ctStamps[*ntS].sd, &ctStamps[*ntS].fwhm,
                                    &ctStamps[*ntS].lfwhm, 0x0, 0xffff, 3))) {
                 /* pointless */
-                if (state->verbose >= 1)
+                if (state->verbose >= 2)
                     fprintf(stderr, "    Tmpl  xs : %4i ys : %4i  (sky,dsky = %.1f,%.1f)\n",
                             ctStamps[*ntS].x, ctStamps[*ntS].y, ctStamps[*ntS].mode, ctStamps[*ntS].fwhm);
             }
@@ -233,7 +233,7 @@ void buildStamps(hotpants_state_t *state, int sXMin, int sXMax, int sYMin, int s
                 
                 /* pointless */
                 /* buildSigMask(&ciStamps[*niS], sPixX, sPixY, misRData); */
-                if (state->verbose >= 1)
+                if (state->verbose >= 2)
                     fprintf(stderr, "    Image xs : %4i ys : %4i  (sky,dsky = %.1f,%.1f)\n",
                             ciStamps[*niS].x, ciStamps[*niS].y, ciStamps[*niS].mode, ciStamps[*niS].fwhm);
             }
@@ -246,7 +246,7 @@ void buildStamps(hotpants_state_t *state, int sXMin, int sXMax, int sYMin, int s
         if (getCenters) {
             /* get potential centers for the kernel fit */
             getPsfCenters(state, &ctStamps[*ntS], tRData, sPixX, sPixY, state->tUKThresh, bbitt1, bbitt2);
-            if (state->verbose >= 1)
+            if (state->verbose >= 2)
                 fprintf(stderr, "    Tmpl     : scnt = %2i nss = %2i\n",
                         ctStamps[*ntS].sscnt, ctStamps[*ntS].nss);
             
@@ -288,7 +288,7 @@ void buildStamps(hotpants_state_t *state, int sXMin, int sXMax, int sYMin, int s
                     ctStamps[*ntS].xss[nss] = xmax;
                     ctStamps[*ntS].yss[nss] = ymax;	    
                     ctStamps[*ntS].nss += 1;
-                    if (state->verbose >= 2) fprintf(stderr,"     #%d @ %4d,%4d\n", nss, xmax, ymax);
+                    if (state->verbose >= 3) fprintf(stderr,"     #%d @ %4d,%4d\n", nss, xmax, ymax);
                 }
             }
         }
@@ -300,7 +300,7 @@ void buildStamps(hotpants_state_t *state, int sXMin, int sXMax, int sYMin, int s
         if (getCenters) {
             /* get potential centers for the kernel fit */
             getPsfCenters(state, &ciStamps[*niS], iRData, sPixX, sPixY, state->iUKThresh, bbiti1, bbiti2);
-            if (state->verbose >= 1)
+            if (state->verbose >= 2)
                 fprintf(stderr, "    Image    : scnt = %2i nss = %2i\n",
                         ciStamps[*niS].sscnt, ciStamps[*niS].nss);
         } else {
@@ -508,7 +508,7 @@ int getPsfCenters(hotpants_state_t *state, stamp_struct *stamp, float *iData, in
     float dfrac = 0.9;
     
     if (stamp->nss >= state->nKSStamps) {
-        fprintf(stderr,"    no need for automatic substamp search...\n");
+    if (state->verbose >= 1) fprintf(stderr,"    no need for automatic substamp search...\n");
         return(0);
     }
     
