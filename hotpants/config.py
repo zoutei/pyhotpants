@@ -66,10 +66,7 @@ class HotpantsConfig:
 
         Kernel composition parameters
         -----------------------------
-        The following parameters control how the convolution kernel is constructed
-        from a sum of Gaussians. They mirror the `-ng` style flags in the
-        original HOTPANTS tool and are passed through to the C layer where the
-        kernel basis is built.
+        The following parameters control how the convolution kernel is constructed from a sum of Gaussians. They mirror the `-ng` style flags in the original HOTPANTS tool and are passed through to the C layer where the kernel basis is built.
 
         ngauss (int): Number of Gaussian components which compose the kernel.
             Defaults to 3. Each Gaussian has an associated polynomial degree and
@@ -197,11 +194,11 @@ class HotpantsConfig:
         self.fwstamp = int(max(fwstamp_est, self.fwksstamp + self.fwkernel))
 
         # [-ng ngauss]      : number of gaussians which compose kernel (3)
-        self.ngauss = 3
+        self.ngauss = kwargs.get("ngauss", 3)
         # [-ng ... degree0 .. degreeN] : degree of polynomial associated with gaussian #
-        self.deg_fixe = [6, 4, 2]
+        self.deg_fixe = kwargs.get("deg_fixe", [6, 4, 2])
         # [-ng ... sigma0 .. sigmaN] : width of gaussian #
-        self.sigma_gauss = [0.7, 1.5, 3.0]
+        self.sigma_gauss = kwargs.get("sigma_gauss", [0.7, 1.5, 3.0])
         self.ncomp = ((self.ko + 1) * (self.ko + 2)) // 2
         self.n_bg_vectors = ((self.bgo + 1) * (self.bgo + 2)) // 2
         self.ncomp_ker = sum(((d + 1) * (d + 2)) // 2 for d in self.deg_fixe)
