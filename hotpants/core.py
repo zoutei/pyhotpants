@@ -17,7 +17,9 @@ from datetime import datetime
 
 from .config import HotpantsConfig
 from .models import Substamp, SubstampStatus
+from .models import Substamp, SubstampStatus
 from . import functions as pyhotpants
+from . import pure
 
 # C extension will be imported dynamically
 hotpants_ext = None
@@ -78,6 +80,7 @@ class Hotpants:
         star_catalog: Optional[np.ndarray] = None,
         config: Optional[HotpantsConfig] = None,
         output_header: Optional[fits.Header] = None,
+        use_c_extension: bool = False,
     ):
         """
         Initializes the Hotpants object and performs pre-processing.
@@ -104,8 +107,14 @@ class Hotpants:
             output_header: An `astropy.io.fits.Header` object to use for all
                 output FITS files. If loading from FITS files, the header of
                 the science image is used by default.
+            use_c_extension: boolean to use C extension or pure python
         """
-        self.ext = _get_ext()
+        self.use_c_extension = use_c_extension
+        if self.use_c_extension:
+            self.ext = _get_ext()
+        else:
+            self.ext = None
+            
         self.output_header = output_header
 
         if isinstance(template_data, str):
@@ -133,6 +142,17 @@ class Hotpants:
         self.config = config if config is not None else HotpantsConfig(nx=self.nx, ny=self.ny)
         self._t_error_input = np.ascontiguousarray(t_error, dtype=np.float32) if t_error is not None else None
         self._i_error_input = np.ascontiguousarray(i_error, dtype=np.float32) if i_error is not None else None
+        
+        # Sanitize Inputs (NaN Handling)
+        self._t_nan_mask = np.isnan(self.template_data)
+        if np.any(self._t_nan_mask):
+            fill = self.config.fillval if hasattr(self.config, 'fillval') else 1e-30
+            self.template_data[self._t_nan_mask] = fill
+            
+        self._i_nan_mask = np.isnan(self.image_data)
+        if np.any(self._i_nan_mask):
+            fill = self.config.fillval if hasattr(self.config, 'fillval') else 1e-30
+            self.image_data[self._i_nan_mask] = fill
 
         if star_catalog is not None:
             if not isinstance(star_catalog, np.ndarray) or star_catalog.ndim != 2 or star_catalog.shape[1] != 2:
@@ -161,15 +181,35 @@ class Hotpants:
             self.config.ilthresh = np.min(self.image_data)
 
         # Initialize C state object and pre-compute masks and noise images
-        self._c_state = self.ext.HotpantsState(self.nx, self.ny, self.config.to_dict())
-        if self.config.verbose >= 1:
-            print(f"Initialized HOTPANTS state: {self._c_state}")
+        if self.use_c_extension:
+            self._c_state = self.ext.HotpantsState(self.nx, self.ny, self.config.to_dict())
+            if self.config.verbose >= 1:
+                print(f"Initialized HOTPANTS state: {self._c_state}")
+        else:
+            self._c_state = None
+            if self.config.verbose >= 1:
+                print(f"Initialized HOTPANTS (Pure Python Mode)")
 
         # 1. Create the initial input mask from the images and C extension.
         self._t_mask_input = np.ascontiguousarray(t_mask, dtype=np.int32) if t_mask is not None else None
         self._i_mask_input = np.ascontiguousarray(i_mask, dtype=np.int32) if i_mask is not None else None
 
-        input_mask = self.ext.make_input_mask(self._c_state, self.template_data, self.image_data, self._t_mask_input, self._i_mask_input)
+        self._t_mask_input = np.ascontiguousarray(t_mask, dtype=np.int32) if t_mask is not None else None
+        self._i_mask_input = np.ascontiguousarray(i_mask, dtype=np.int32) if i_mask is not None else None
+        
+        if self.use_c_extension:
+            input_mask = self.ext.make_input_mask(self._c_state, self.template_data, self.image_data, self._t_mask_input, self._i_mask_input)
+        else:
+            # Pure Python masking
+            t_bad = pure.utils.mask_pixels(self.template_data, self.config.tlthresh, self.config.tuthresh)
+            i_bad = pure.utils.mask_pixels(self.image_data, self.config.ilthresh, self.config.iuthresh)
+            input_mask = t_bad | i_bad
+            if self._t_mask_input is not None: input_mask |= (self._t_mask_input > 0)
+            if self._i_mask_input is not None: input_mask |= (self._i_mask_input > 0)
+            # Add NaN masks
+            if hasattr(self, '_t_nan_mask') and np.any(self._t_nan_mask): input_mask |= self._t_nan_mask
+            if hasattr(self, '_i_nan_mask') and np.any(self._i_nan_mask): input_mask |= self._i_nan_mask
+
         if self.config.verbose >= 1:
             print(f"Input mask created with shape: {input_mask.shape}, dtype: {input_mask.dtype}")
         self.results["input_mask"] = input_mask
@@ -180,14 +220,26 @@ class Hotpants:
             t_noise_sq = np.ascontiguousarray(self._t_error_input**2, dtype=np.float32)
         else:
             # Generate noise image from scratch and square it.
-            t_noise_sq = self.ext.calculate_noise_image(self._c_state, self.template_data, True)
+            if self.use_c_extension:
+                t_noise_sq = self.ext.calculate_noise_image(self._c_state, self.template_data, True)
+            else:
+                sig, mode = pure.utils.calculate_noise(self.template_data, input_mask)
+                rn = self.config.trdnoise
+                gain = self.config.tgain
+                t_noise_sq = (rn / gain)**2 + np.abs(self.template_data) / gain
 
         if self._i_error_input is not None:
             # Use user-provided noise image, squared.
             i_noise_sq = np.ascontiguousarray(self._i_error_input**2, dtype=np.float32)
         else:
             # Generate noise image from scratch and square it.
-            i_noise_sq = self.ext.calculate_noise_image(self._c_state, self.image_data, False)
+            if self.use_c_extension:
+                i_noise_sq = self.ext.calculate_noise_image(self._c_state, self.image_data, False)
+            else:
+                rn = self.config.irdnoise
+                gain = self.config.igain
+                i_noise_sq = (rn / gain)**2 + np.abs(self.image_data) / gain
+
 
         # 3. Store the squared noise images for later use.
         self.results["t_noise_sq"] = t_noise_sq
@@ -244,10 +296,75 @@ class Hotpants:
             A tuple containing two lists: the `Substamp` objects found on the
             template and the `Substamp` objects found on the science image.
         """
-        t_substamps_coords, i_substamps_coords = self.ext.find_stamps(self._c_state, self.template_data, self.image_data, self.config.fitthresh, self.star_catalog)
+        if self.use_c_extension:
+            t_substamps_coords, i_substamps_coords = self.ext.find_stamps(self._c_state, self.template_data, self.image_data, self.config.fitthresh, self.star_catalog)
+            self.template_substamps = [Substamp(**coords) for coords in t_substamps_coords]
+            self.image_substamps = [Substamp(**coords) for coords in i_substamps_coords]
+        else:
+            if self.star_catalog is not None:
+                # Use catalog
+                # star_catalog is (N, 2) array of x, y (0-indexed in __init__)
+                t_stamps = [{'x': int(x), 'y': int(y)} for x, y in self.star_catalog]
+                i_stamps = [{'x': int(x), 'y': int(y)} for x, y in self.star_catalog]
+                # Filter by mask?
+                # C extension checks mask.
+                # If we want to filter:
+                if self.results.get("input_mask") is not None:
+                     mask = self.results["input_mask"]
+                     h, w = mask.shape
+                     box_r = self.config.rss
+                     
+                     valid_t = []
+                     for s in t_stamps:
+                         # Center check
+                         cx, cy = s['x'], s['y']
+                         if not (0 <= cx < w and 0 <= cy < h):
+                             continue
+                             
+                         # Box limits
+                         x0 = max(0, cx - box_r)
+                         x1 = min(w, cx + box_r + 1)
+                         y0 = max(0, cy - box_r)
+                         y1 = min(h, cy + box_r + 1)
+                         
+                         # Check mask in box (Zero tolerance)
+                         if np.any(mask[y0:y1, x0:x1]):
+                             continue
+                             
+                         valid_t.append(s)
+                     t_stamps = valid_t
+                     
+                     valid_i = []
+                     for s in i_stamps:
+                         cx, cy = s['x'], s['y']
+                         if not (0 <= cx < w and 0 <= cy < h):
+                             continue
+                             
+                         x0 = max(0, cx - box_r)
+                         x1 = min(w, cx + box_r + 1)
+                         y0 = max(0, cy - box_r)
+                         y1 = min(h, cy + box_r + 1)
+                         
+                         if np.any(mask[y0:y1, x0:x1]):
+                             continue
 
-        self.template_substamps = [Substamp(**coords) for coords in t_substamps_coords]
-        self.image_substamps = [Substamp(**coords) for coords in i_substamps_coords]
+                         valid_i.append(s)
+                     i_stamps = valid_i
+                     
+            else:
+                print(f"DEBUG core.py: pure.utils={pure.utils}", flush=True)
+                print(f"DEBUG core.py: pure.utils.find_stamps={pure.utils.find_stamps}", flush=True)
+                n_total = self.config.nstampx * self.config.nstampy
+                box_size = 2 * self.config.rss + 1
+                # Note: passing template/image data
+                t_stamps = pure.utils.find_stamps(self.template_data, self.results.get("input_mask"), n_total, box_size)
+                i_stamps = pure.utils.find_stamps(self.image_data, self.results.get("input_mask"), n_total, box_size)
+            
+            # pure.utils.find_stamps returns list of dicts {'y', 'x', 'flux'}
+            # Substamp expects x, y, substamp_id, stamp_group_id
+            # We map them.
+            self.template_substamps = [Substamp(x=s['x'], y=s['y'], substamp_id=i, stamp_group_id=i) for i, s in enumerate(t_stamps)]
+            self.image_substamps = [Substamp(x=s['x'], y=s['y'], substamp_id=i, stamp_group_id=i) for i, s in enumerate(i_stamps)]
 
         if self.config.verbose >= 1:
             print(f"Found {len(self.template_substamps)} potential template substamps and {len(self.image_substamps)} potential image substamps.")
@@ -287,38 +404,90 @@ class Hotpants:
 
         # Fit template-derived substamps
         if self.template_substamps:
-            t_coords = [{"substamp_id": s.id, "stamp_group_id": s.stamp_group_id, "x": s.x, "y": s.y} for s in self.template_substamps]
-            t_fom, t_fit_results = self.ext.fit_stamps_and_get_fom(self._c_state, self.template_data, self.image_data, combined_error_sq, "t", t_coords)
+            if self.use_c_extension:
+                t_coords = [{"substamp_id": s.id, "stamp_group_id": s.stamp_group_id, "x": s.x, "y": s.y} for s in self.template_substamps]
+                t_fom, t_fit_results = self.ext.fit_stamps_and_get_fom(self._c_state, self.template_data, self.image_data, combined_error_sq, "t", t_coords)
+    
+                # Populate substamp objects with the complete, isolated results from the C extension
+                for result in t_fit_results:
+                    substamp = t_substamp_map.get(result["substamp_id"])
+                    if substamp:
+                        substamp.image_cutout = result["image_cutout"]
+                        substamp.template_cutout = result["template_cutout"]
+                        substamp.noise_variance_cutout = result["noise_cutout"]
+                        substamp.basis_vectors = result["basis_vectors"]
+                        substamp.local_kernel_solution = result["local_solution"]
+                        substamp.convolved_model_local = result["convolved_model_local"]
+                        substamp.fit_results["t"] = {"fom": result["fom"], "chi2": result["chi2"]}
+            else:
+                # Pure Python Implementation
+                # 1. Generate Basis Vectors (Global Config)
+                k_size = 2 * self.config.rkernel + 1
+                basis_funcs = pure.kernel.calculate_kernel_basis((k_size, k_size), self.config.sigma_gauss, self.config.deg_fixe)
+                
+                # 2. Fit Template Stamps -> Match Template(Ref) to Image(Data)
+                # Direction 't': We convolve Template. Template is Reference. Image is Data.
+                t_valid = pure.fitting.fit_stamps_locally(self.template_substamps, self.template_data, self.image_data, self.config, basis_funcs)
+                
+                # Calculate FOM
+                if t_valid:
+                    t_fom = np.mean([s.chi2 for s in t_valid])
+                    
+                    # Update status and map results back
+                    # Create lookup by (int(x), int(y)) to be safe? 
+                    # pure.fitting uses passed coordinates.
+                    t_map = {(int(s.x), int(s.y)): s for s in self.template_substamps}
+                    
+                    t_updated_count = 0
+                    for stamp_res in t_valid:
+                        # Find matching substamp
+                        key = (int(stamp_res.x), int(stamp_res.y))
+                        if key in t_map:
+                            substamp = t_map[key]
+                            substamp.status = SubstampStatus.PASSED_FOM_CHECK
+                            substamp.chi2 = float(stamp_res.chi2)
+                            substamp.image_cutout = stamp_res.image_cutout
+                            substamp.template_cutout = stamp_res.template_cutout
+                            substamp.basis_vectors = stamp_res.basis_vectors
+                            substamp.local_kernel_solution = stamp_res.local_solution
+                            substamp.convolved_model_local = stamp_res.convolved_model_local
+                            substamp.fit_results["t"] = {"fom": float(stamp_res.chi2), "chi2": float(stamp_res.chi2)}
+                            t_updated_count += 1
+                    if self.config.verbose >= 1:
+                        print(f"DEBUG core.py: Updated status for {t_updated_count}/{len(t_valid)} template stamps.", flush=True)
+                        
+                else:
+                    t_fom = float('inf')
 
-            # Populate substamp objects with the complete, isolated results from the C extension
-            for result in t_fit_results:
-                substamp = t_substamp_map.get(result["substamp_id"])
-                if substamp:
-                    substamp.image_cutout = result["image_cutout"]
-                    substamp.template_cutout = result["template_cutout"]
-                    substamp.noise_variance_cutout = result["noise_cutout"]
-                    substamp.basis_vectors = result["basis_vectors"]
-                    substamp.local_kernel_solution = result["local_solution"]
-                    substamp.convolved_model_local = result["convolved_model_local"]
-                    substamp.fit_results["t"] = {"fom": result["fom"], "chi2": result["chi2"]}
+                # 3. Fit Image Stamps -> Match Image(Ref) to Template(Data)
+                # Direction 'i': We convolve Image. Image is Reference. Template is Data.
+                i_valid = pure.fitting.fit_stamps_locally(self.image_substamps, self.image_data, self.template_data, self.config, basis_funcs)
+                
+                if i_valid:
+                    i_fom = np.mean([s.chi2 for s in i_valid])
+                    
+                    i_map = {(int(s.x), int(s.y)): s for s in self.image_substamps}
+                    
+                    i_updated_count = 0
+                    for stamp_res in i_valid:
+                        key = (int(stamp_res.x), int(stamp_res.y))
+                        if key in i_map:
+                            substamp = i_map[key]
+                            substamp.status = SubstampStatus.PASSED_FOM_CHECK
+                            substamp.chi2 = float(stamp_res.chi2)
+                            substamp.image_cutout = stamp_res.image_cutout
+                            substamp.template_cutout = stamp_res.template_cutout
+                            substamp.basis_vectors = stamp_res.basis_vectors
+                            substamp.local_kernel_solution = stamp_res.local_solution
+                            substamp.convolved_model_local = stamp_res.convolved_model_local
+                            substamp.fit_results["i"] = {"fom": float(stamp_res.chi2), "chi2": float(stamp_res.chi2)}
+                            i_updated_count += 1
+                    if self.config.verbose >= 1:
+                        print(f"DEBUG core.py: Updated status for {i_updated_count}/{len(i_valid)} image stamps.", flush=True)
+                            
+                else:
+                    i_fom = float('inf')
 
-        # Fit image-derived substamps
-        if self.image_substamps:
-            i_coords = [{"substamp_id": s.id, "stamp_group_id": s.stamp_group_id, "x": s.x, "y": s.y} for s in self.image_substamps]
-            i_fom, i_fit_results = self.ext.fit_stamps_and_get_fom(self._c_state, self.image_data, self.template_data, combined_error_sq, "i", i_coords)
-
-            # Populate substamp objects with the complete, isolated results from the C extension
-            for result in i_fit_results:
-                substamp = i_substamp_map.get(result["substamp_id"])
-                if substamp:
-                    # Note: For 'i' direction, the roles of image/template are swapped in the C output
-                    substamp.image_cutout = result["template_cutout"]
-                    substamp.template_cutout = result["image_cutout"]
-                    substamp.noise_variance_cutout = result["noise_cutout"]
-                    substamp.basis_vectors = result["basis_vectors"]
-                    substamp.local_kernel_solution = result["local_solution"]
-                    substamp.convolved_model_local = result["convolved_model_local"]
-                    substamp.fit_results["i"] = {"fom": result["fom"], "chi2": result["chi2"]}
 
         # Select best direction
         conv_direction = self.config.force_convolve
@@ -328,16 +497,32 @@ class Hotpants:
                 print(f"Template FOM: {t_fom:.3f}, Image FOM: {i_fom:.3f}. Selecting direction: '{conv_direction}'")
 
         # Update status based on the winning direction
+        # Update status based on the winning direction
         if conv_direction == "t":
-            for result in t_fit_results:
-                substamp = t_substamp_map.get(result["substamp_id"])
-                if substamp:
-                    substamp.status = SubstampStatus.PASSED_FOM_CHECK if result["survived_check"] else SubstampStatus.REJECTED_FOM_CHECK
+            # For Pure Python, we need to mark them passed if they have fit results
+            if self.use_c_extension:
+                for result in t_fit_results:
+                    substamp = t_substamp_map.get(result["substamp_id"])
+                    if substamp:
+                        substamp.status = SubstampStatus.PASSED_FOM_CHECK if result["survived_check"] else SubstampStatus.REJECTED_FOM_CHECK
+            else:
+                for s in self.template_substamps:
+                    if "t" in s.fit_results and s.fit_results["t"]["fom"] < float('inf'):
+                         s.status = SubstampStatus.PASSED_FOM_CHECK
+                    else:
+                         s.status = SubstampStatus.REJECTED_FOM_CHECK
         else:  # 'i'
-            for result in i_fit_results:
-                substamp = i_substamp_map.get(result["substamp_id"])
-                if substamp:
-                    substamp.status = SubstampStatus.PASSED_FOM_CHECK if result["survived_check"] else SubstampStatus.REJECTED_FOM_CHECK
+            if self.use_c_extension:
+                for result in i_fit_results:
+                    substamp = i_substamp_map.get(result["substamp_id"])
+                    if substamp:
+                        substamp.status = SubstampStatus.PASSED_FOM_CHECK if result["survived_check"] else SubstampStatus.REJECTED_FOM_CHECK
+            else:
+                for s in self.image_substamps:
+                    if "i" in s.fit_results and s.fit_results["i"]["fom"] < float('inf'):
+                         s.status = SubstampStatus.PASSED_FOM_CHECK
+                    else:
+                         s.status = SubstampStatus.REJECTED_FOM_CHECK
 
         self.results["conv_direction"] = conv_direction
         return conv_direction
@@ -365,6 +550,12 @@ class Hotpants:
 
         conv_direction = self.results["conv_direction"]
         candidate_substamps = self.template_substamps if conv_direction == "t" else self.image_substamps
+        
+        print(f"DEBUG core.py: iterative_fit direction={conv_direction}, candidates={len(candidate_substamps)}", flush=True)
+        if candidate_substamps:
+             statuses = [s.status for s in candidate_substamps]
+             from collections import Counter
+             print(f"DEBUG core.py: status counts={Counter(statuses)}", flush=True)
 
         # Create a list of stamps for the C function, grouping substamps by group_id
         stamps_for_fit = []
@@ -385,33 +576,84 @@ class Hotpants:
         if not stamps_for_fit:
             raise HotpantsError("No substamps passed the initial FOM check.")
 
-        if conv_direction == "t":
-            conv_img, ref_img = self.template_data, self.image_data
+        if self.use_c_extension:
+            # C extension call
+            # Get noise/variance (Assuming standard Hotpants behaviour: 'noise' usually means variance map for convolution)
+            # In apply_kernel we pass t_noise_sq / i_noise_sq.
+            # fit_kernel expects 'noise_arr'.
+            t_noise_sq = self.results.get("t_noise_sq")
+            i_noise_sq = self.results.get("i_noise_sq")
+            
+            if conv_direction == "t":
+                conv_img, ref_img = self.template_data, self.image_data
+                noise_img = t_noise_sq
+            else:
+                conv_img, ref_img = self.image_data, self.template_data
+                noise_img = i_noise_sq
+                
+            kernel_solution, stats, survivors_indices = self.ext.fit_kernel(self._c_state, stamps_for_fit, conv_img, ref_img, noise_img)
+            
+            # survivors_indices is list of indices into the *sorted* list of stamps passed to C?
+            # stamps_for_fit has groupings.
+            # C iterates flat list of stamps?
+            # No, C iterates `stamps_list` (groups).
+            # So indices refer to `stamps_for_fit` / `candidate_stamps_in_order`.
+            
+            final_fits_substamps = []
+            survivor_set = set(survivors_indices)
+            
+            # Map back to substamp objects
+            # candidate_stamps_in_order aligns with stamps_for_fit
+            
+            survivor_group_ids = set()
+            for idx in survivors_indices:
+                if idx < len(candidate_stamps_in_order):
+                    s = candidate_stamps_in_order[idx]
+                    survivor_group_ids.add(s.stamp_group_id)
+            
+            # Update status
+            for s in candidate_substamps:
+                if s.status == SubstampStatus.PASSED_FOM_CHECK:
+                    if s.stamp_group_id in survivor_group_ids:
+                        s.status = SubstampStatus.USED_IN_FINAL_FIT
+                        final_fits_substamps.append(s)
+                    else:
+                        s.status = SubstampStatus.REJECTED_ITERATIVE_FIT
+                        
+            self.results["kernel_solution"] = kernel_solution
+            self.results["final_fits"] = final_fits_substamps
+            self.results["fit_stats"] = stats
+            
+            if self.config.verbose >= 1:
+                print(f"Final fit stats: mean_sig={stats.get('meansig', 0):.3f}, scatter={stats.get('scatter', 0):.3f}")
+
+            return kernel_solution, final_fits_substamps
+
         else:
-            conv_img, ref_img = self.image_data, self.template_data
+            # Pure Python FIT
+            if conv_direction == "t":
+                conv_img, ref_img = self.template_data, self.image_data
+            else:
+                conv_img, ref_img = self.image_data, self.template_data
+            
+            k_size = 2 * self.config.rkernel + 1
+            basis_funcs = pure.kernel.calculate_kernel_basis((k_size, k_size), self.config.sigma_gauss, self.config.deg_fixe)
+            
+            kernel_solution = pure.fitting.fit_kernel(candidate_substamps, conv_img, ref_img, self.config, basis_funcs)
+            
+            # Update output result
+            final_fits_substamps = [s for s in candidate_substamps if not getattr(s, 'ignore', False)]
+            
+            # Set status for these
+            for s in final_fits_substamps:
+                s.status = SubstampStatus.USED_IN_FINAL_FIT
+            
+            self.results["kernel_solution"] = kernel_solution
+            self.results["final_fits"] = final_fits_substamps
+            self.results["fit_stats"] = {} # Populate if possible
+            
+            return kernel_solution, final_fits_substamps
 
-        kernel_solution, stats, final_survivor_indices = self.ext.fit_kernel(self._c_state, stamps_for_fit, conv_img, ref_img, self.results["t_noise_sq"] + self.results["i_noise_sq"])
-
-        final_fits_substamps = []
-        survivor_group_ids = {candidate_stamps_in_order[i].stamp_group_id for i in final_survivor_indices}
-
-        for s in candidate_substamps:
-            if s.status == SubstampStatus.PASSED_FOM_CHECK:
-                if s.stamp_group_id in survivor_group_ids:
-                    s.status = SubstampStatus.USED_IN_FINAL_FIT
-                    final_fits_substamps.append(s)
-                else:
-                    s.status = SubstampStatus.REJECTED_ITERATIVE_FIT
-
-        if not final_fits_substamps:
-            raise HotpantsError("All stamps were clipped during iterative fitting.")
-        if self.config.verbose >= 1:
-            print(f"Final fit uses {len(final_survivor_indices)} stamp groups. Fit stats: mean_sig={stats['meansig']:.3f}, scatter={stats['scatter']:.3f}")
-
-        self.results["kernel_solution"] = kernel_solution
-        self.results["final_fits"] = final_fits_substamps
-        self.results["fit_stats"] = stats
-        return kernel_solution, final_fits_substamps
 
     def convolve_and_difference(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -448,10 +690,36 @@ class Hotpants:
             noise_to_convolve_sq = i_noise_sq
             target_noise_sq = t_noise_sq
 
-        convolved_image, output_mask, conv_noise_sq = self.ext.apply_kernel(self._c_state, image_to_convolve, self.results["kernel_solution"], noise_to_convolve_sq)
+        if self.use_c_extension:
+            convolved_image, output_mask, conv_noise_sq = self.ext.apply_kernel(self._c_state, image_to_convolve, self.results["kernel_solution"], noise_to_convolve_sq)
+        else:
+            # Pure Python Convolution
+            # 1. Calculate Basis Functions
+            k_size = 2 * self.config.rkernel + 1
+            basis_funcs = pure.kernel.calculate_kernel_basis((k_size, k_size), self.config.sigma_gauss, self.config.deg_fixe)
+            # Convert basis_funcs to 3D array for Numba
+            basis_vecs = np.array(basis_funcs)
+            
+            # 2. Get Variance / Mask
+            # noise_to_convolve_sq is the Variance map.
+            # mask? self.results.get('input_mask')
+            mask = self.results.get('input_mask')
+            if mask is None: mask = np.zeros_like(image_to_convolve, dtype=np.int32)
+            
+            # 3. Apply Kernel
+            convolved_image, conv_noise_sq, output_mask_conv = pure.convolution.apply_kernel(
+                image_to_convolve, self.results["kernel_solution"], 
+                noise_to_convolve_sq, mask, 
+                self.config, basis_vecs
+            )
+            
+            # Output mask from convolution needs to be merged with existing?
+            # Hotpants C logic: convolve returns modified mask.
+            output_mask = output_mask_conv
 
-        bkg = self.ext.get_background_image(self._c_state, self.results["kernel_solution"])
-        convolved_image += bkg
+        if self.use_c_extension:
+            bkg = self.ext.get_background_image(self._c_state, self.results["kernel_solution"])
+            convolved_image += bkg
 
         diff_image = target_image - convolved_image
         final_noise = np.sqrt(conv_noise_sq + target_noise_sq)
@@ -495,7 +763,32 @@ class Hotpants:
         final_conv[bad_pixels] = self.config.fillval
         final_noise[bad_pixels] = self.config.fillval_noise
 
-        self.results["stats"] = self.ext.calculate_final_stats(self._c_state, final_diff, final_noise, output_mask)
+        if self.use_c_extension:
+            self.results["stats"] = self.ext.calculate_final_stats(self._c_state, final_diff, final_noise, output_mask)
+        else:
+            # Pure Python Stats Calculation
+            valid_pixels = (output_mask == 0) & np.isfinite(final_diff) & (final_noise > 0)
+            
+            if np.any(valid_pixels):
+                diff_vals = final_diff[valid_pixels]
+                noise_vals = final_noise[valid_pixels]
+                
+                stats = {}
+                stats["diff_mean"] = float(np.mean(diff_vals))
+                stats["diff_std"] = float(np.std(diff_vals))
+                stats["noise_mean"] = float(np.mean(noise_vals))
+                stats["nx2norm"] = int(np.sum(valid_pixels))
+                
+                # Chi2 Norm: sum((diff / noise)^2) / N
+                chi2 = np.sum((diff_vals / noise_vals)**2)
+                stats["x2norm"] = float(chi2 / stats["nx2norm"])
+                
+                self.results["stats"] = stats
+            else:
+                self.results["stats"] = {
+                    "diff_mean": 0.0, "diff_std": 0.0, "noise_mean": 0.0, 
+                    "nx2norm": 0, "x2norm": 0.0
+                }
 
         return {
             "diff_image": final_diff,
@@ -671,7 +964,60 @@ class Hotpants:
         if not isinstance(size_factor, (int, float)) or size_factor <= 0:
             raise ValueError("size_factor must be a positive number.")
 
-        kernel_image = self.ext.visualize_kernel(self._c_state, at_coords, self.results["kernel_solution"], size_factor)
+        if self.use_c_extension:
+            kernel_image = self.ext.visualize_kernel(self._c_state, at_coords, self.results["kernel_solution"], size_factor)
+        else:
+             # Pure Python Implementation
+            k_size = 2 * self.config.rkernel + 1
+            if not self.config.deg_fixe: # Handle potential missing config
+                 self.config.deg_fixe = [self.config.ko] * self.config.ngauss # Default or error? Assuming config is valid.
+                 
+            basis_funcs = pure.kernel.calculate_kernel_basis((k_size, k_size), self.config.sigma_gauss, self.config.deg_fixe)
+            kernel_vecs = np.array(basis_funcs)
+            
+            x, y = at_coords
+            kernel_sol = self.results["kernel_solution"]
+            
+            step = getattr(self.config, 'kc_step', k_size)
+            ker_order = self.config.ko
+            n_comp_ker = len(basis_funcs)
+            
+            local_kernel = pure.convolution.jit_make_kernel(
+                kernel_sol, step, self.config.rkernel, 
+                self.nx, self.ny,
+                n_comp_ker, ker_order, kernel_vecs,
+                x, y
+            )
+            
+            # Output image sizing
+            out_size = int(k_size * size_factor)
+            output = np.zeros((out_size, out_size))
+            
+            # Center the kernel
+            y_off = (out_size - k_size) // 2
+            x_off = (out_size - k_size) // 2
+            
+            # Handle clipping if output is smaller than kernel (unlikely but possible)
+            y_start_k = 0
+            y_end_k = k_size
+            x_start_k = 0
+            x_end_k = k_size
+            
+            if y_off < 0:
+                y_start_k = -y_off
+                y_off = 0
+            if x_off < 0:
+                x_start_k = -x_off
+                x_off = 0
+                
+            h_paste = min(out_size - y_off, y_end_k - y_start_k)
+            w_paste = min(out_size - x_off, x_end_k - x_start_k)
+            
+            if h_paste > 0 and w_paste > 0:
+                output[y_off:y_off+h_paste, x_off:x_off+w_paste] = \
+                    local_kernel[y_start_k:y_start_k+h_paste, x_start_k:x_start_k+w_paste]
+            
+            kernel_image = output
         return kernel_image
 
     def get_substamp_details(self) -> Dict[str, Any]:
