@@ -269,3 +269,46 @@ def find_stamps(image, mask, n_stamps, box_size, border_width=10):
     # Returning simple list of dicts or objects
     # Pure python impl usually wants objects, but for now coords
     return [{'x': c[1], 'y': c[2], 'flux': c[0]} for c in selected]
+    
+# =========================================================
+# Image Manipulation
+# =========================================================
+
+@njit(cache=True)
+def downsample_image(image: np.ndarray, factor: int) -> np.ndarray:
+    """
+    Downsamples an image by summing blocks of size factor x factor.
+    Assumes image dimensions are multiples of factor.
+    
+    Parameters
+    ----------
+    image : ndarray
+        High-resolution image.
+    factor : int
+        Integer downsampling factor.
+        
+    Returns
+    -------
+    downsampled : ndarray
+        Low-resolution image (summed).
+    """
+    if factor == 1:
+        return image
+        
+    ny, nx = image.shape
+    new_ny = ny // factor
+    new_nx = nx // factor
+    
+    downsampled = np.zeros((new_ny, new_nx), dtype=image.dtype)
+    
+    for j in range(new_ny):
+        for i in range(new_nx):
+            block_sum = 0.0
+            y_start = j * factor
+            x_start = i * factor
+            for ky in range(factor):
+                for kx in range(factor):
+                    block_sum += image[y_start + ky, x_start + kx]
+            downsampled[j, i] = block_sum
+            
+    return downsampled

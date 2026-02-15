@@ -308,6 +308,4 @@ def apply_kernel(image, kernel_sol, variance, mask, config, kernel_vecs, oversam
         ny_lr, nx_lr
     )
     
-    total_model = conv_lr + bg_lr
-    
-    return total_model, var_lr, mask_out_lr
+    return conv_lr, bg_lr, var_lr, mask_out_lr
