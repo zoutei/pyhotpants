@@ -4,30 +4,13 @@ import numpy as np
 def calculate_kernel_basis(shape, sigma_gauss, deg_fixe):
     """
     Calculate the kernel basis functions exactly matching alard.c logic.
-    
-    Parameters
-    ----------
-    shape : tuple
-        Shape of the kernel (ny, nx). Should be odd.
-    sigma_gauss : list of floats
-        Sigma widths for the Gaussian components.
-    deg_fixe : list of ints
-        Polynomial degrees for each Gaussian component.
-        
-    Returns
-    -------
-    basis : list of ndarray
-        List of 2D kernel basis images.
     """
     basis = []
     
     ny, nx = shape
     y0, x0 = (ny - 1) // 2, (nx - 1) // 2
     
-    # Generate 1D coordinates (centered)
-    # alard.c: x = (double)(ix - state->hwKernel);
-    # ix goes from 0 to fwKernel-1. hwKernel = (fwKernel-1)/2.
-    # so x goes from -hwKernel to +hwKernel.
+    # Generate 1D coordinates
     x_coords = np.arange(nx) - x0
     y_coords = np.arange(ny) - y0
     
@@ -38,58 +21,43 @@ def calculate_kernel_basis(shape, sigma_gauss, deg_fixe):
     for ig, sigma in enumerate(sigma_gauss):
         degree = deg_fixe[ig]
         
-        # alard.c stores 1/(2*sigma^2) in state->sigma_gauss
-        # and uses exp(-x*x * state->sigma_gauss)
-        # We calculate inv_2sigma2 to match that usage
-        inv_2sigma2 = 1.0 / (2.0 * sigma**2)
+        # Match C extension behavior: sigma_gauss values are used DIRECTLY as coefficients
+        # alard.c: qe = exp(-x * x * state->sigma_gauss[ig])
+        # The config should contain 1/(2*sigma^2) values, NOT pixel widths
+        # If your config has pixel widths, they need to be pre-converted
+        sigma_coeff = sigma
         
-        # Pre-compute Gaussian part for 1D arrays
-        # qe = exp(-x * x * state->sigma_gauss[ig])
-        g_x = np.exp(-x_coords**2 * inv_2sigma2)
-        g_y = np.exp(-y_coords**2 * inv_2sigma2)
+        # Pre-compute Gaussian part
+        g_x = np.exp(-x_coords**2 * sigma_coeff)
+        g_y = np.exp(-y_coords**2 * sigma_coeff)
         
-        # Loop over degrees exactly as in alard.c / fillStamp
-        # for (idegx = 0; idegx <= state->deg_fixe[ig]; idegx++)
-        #    for (idegy = 0; idegy <= state->deg_fixe[ig]-idegx; idegy++)
         for deg_x in range(degree + 1):
             for deg_y in range(degree - deg_x + 1):
                 
-                # Check for orthogonalization (ren flag in C)
-                # dx = (deg_x / 2) * 2 - deg_x; (0 if even, !=0 if odd)
-                # dy = (deg_y / 2) * 2 - deg_y;
-                # if (dx == 0 && dy == 0 && nvec > 0) ren = 1;
+                # Check Parity
                 is_even_x = (deg_x % 2 == 0)
                 is_even_y = (deg_y % 2 == 0)
-                ren = (is_even_x and is_even_y and nvec > 0)
                 
-                # Construct 1D filters
-                # state->filter_x[k] = qe * pow(x, deg_x);
+                # 1. Construct 1D filters (Raw)
                 filter_x = g_x * (x_coords ** deg_x)
                 filter_y = g_y * (y_coords ** deg_y)
                 
-                # Normalize 1D filters
-                # sum_x = 1. / sum_x;
-                # state->filter_x[ix] *= sum_x;
-                sum_x = np.sum(filter_x)
-                sum_y = np.sum(filter_y)
-                
-                if sum_x != 0:
-                    filter_x /= sum_x
-                if sum_y != 0:
-                    filter_y /= sum_y
+                # 2. Normalize ONLY if BOTH are even (Strict alard.c replication)
+                if is_even_x and is_even_y:
+                    sum_x = np.sum(filter_x)
+                    sum_y = np.sum(filter_y)
                     
-                # Compute 2D basis vector (Outer Product)
-                # vector[i+state->fwKernel*j] = state->filter_x[i...] * state->filter_y[j...]
-                # This matches np.outer(filter_y, filter_x)
+                    if sum_x != 0: filter_x /= sum_x
+                    if sum_y != 0: filter_y /= sum_y
+                
+                # 3. Compute 2D basis vector (Outer Product)
                 b = np.outer(filter_y, filter_x)
                 
-                # Orthogonalization
-                if ren:
-                    # Subtract off kernel_vec[0]
-                    # vector[i] -= kernel0[i];
-                    if b0 is not None:
-                        b -= b0
-                
+                # 4. Orthogonalization (Renormalization)
+                if is_even_x and is_even_y and nvec > 0:
+                     if b0 is not None:
+                         b -= b0
+
                 # Store b0 if this is the very first vector (nvec=0)
                 if nvec == 0:
                     b0 = b.copy()

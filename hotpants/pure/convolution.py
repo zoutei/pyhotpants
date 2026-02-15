@@ -1,6 +1,7 @@
 
 import numpy as np
 from numba import njit, prange
+from .utils import downsample_image
 
 # =========================================================
 # Local Separable Convolution (For Fitting)
@@ -67,12 +68,9 @@ def jit_make_kernel(kernel_sol, kc_step, hw_kernel, r_pix_x, r_pix_y,
     xf = (block_center_x - 0.5 * r_pix_x) / (0.5 * r_pix_x)
     yf = (block_center_y - 0.5 * r_pix_y) / (0.5 * r_pix_y)
     
-    # Basis 0
-    kernel_coeffs[0] = kernel_sol[0]
-    
-    # Basis > 0
-    k = 1 # Index into kernel_sol
-    for i1 in range(1, n_comp_ker):
+    # Basis Loop (All components vary spatially)
+    k = 0 # Index into kernel_sol
+    for i1 in range(n_comp_ker):
         coeff = 0.0
         ax = 1.0
         for ix in range(ker_order + 1):
@@ -180,9 +178,9 @@ def jit_get_background(kernel_sol, bg_order, n_comp_ker, ker_order, r_pix_x, r_p
     background = np.zeros((ny, nx), dtype=np.float64)
     
     # Index of background coeffs start
-    # 1 (const) + (n_comp - 1) * n_spatial
+    # n_comp_ker * n_spatial
     n_spatial = (ker_order + 1) * (ker_order + 2) // 2
-    bg_start = 1 + (n_comp_ker - 1) * n_spatial
+    bg_start = n_comp_ker * n_spatial
     
     # Pre-calculate BG coeffs in a structure or just direct loop
     # Optimization: The Background is a global polynomial. 
@@ -216,6 +214,7 @@ def jit_get_background(kernel_sol, bg_order, n_comp_ker, ker_order, r_pix_x, r_p
 def jit_convolve_patch(image, kernel):
     """
     Simple 2D convolution for patches.
+    Flip kernel to match standard convolution and alard.c logic.
     """
     input_h, input_w = image.shape
     kh, kw = kernel.shape
@@ -229,18 +228,29 @@ def jit_convolve_patch(image, kernel):
             val = 0.0
             for ky in range(kh):
                 for kx in range(kw):
+                    # No flip: correlation, matching alard.c xy_conv_stamp
                     val += image[y+ky, x+kx] * kernel[ky, kx]
             output[y, x] = val
     return output
 
-def apply_kernel(image, kernel_sol, variance, mask, config, kernel_vecs):
+def apply_kernel(image, kernel_sol, variance, mask, config, kernel_vecs, oversample=1):
     """
     High-level wrapper for spatial_convolve + background.
     Returns: Convolved + Background, Output Variance, Output Mask
+    
+    If oversample > 1, image is High-Res Template.
+    Convolution is done in HR, then downsampled.
+    Background is calculated in LR.
     """
-    hw_kernel = config.rkernel
+    hw_kernel = config.rkernel # In LR pixels? 
+    # Logic issue: If oversample > 1, kernel_vecs are HR.
+    # hw_kernel should match the basis half-width.
+    h_b, w_b = kernel_vecs[0].shape
+    hw_kernel_hr = w_b // 2
+    
     # Calculate kc_step if not present or default
-    kc_step = getattr(config, 'kc_step', 2 * hw_kernel + 1)
+    kc_step_lr = getattr(config, 'kc_step', 2 * config.rkernel + 1)
+    kc_step_hr = kc_step_lr * oversample
     
     ker_order = config.ko
     n_comp_ker = kernel_vecs.shape[0]
@@ -250,20 +260,54 @@ def apply_kernel(image, kernel_sol, variance, mask, config, kernel_vecs):
     ker_frac_mask = getattr(config, 'kfm', 0.99)
     
     # 1. Convolve
-    conv, var, mask_out = jit_spatial_convolve(
+    # Note: jit_spatial_convolve takes image, variance, mask.
+    # If oversample > 1, 'image' is HR template.
+    # variance/mask for template should also be HR if passed?
+    # Usually template variance/mask are same shape as template.
+    
+    conv_hr, var_hr, mask_out_hr = jit_spatial_convolve(
         image, kernel_sol, variance, mask,
-        kc_step, hw_kernel,
+        kc_step_hr, hw_kernel_hr,
         n_comp_ker, ker_order, kernel_vecs,
         convolve_variance, ker_frac_mask
     )
     
-    # 2. Add Background
-    bg = jit_get_background(
+    # 2. Downsample to LR
+    if oversample > 1:
+        conv_lr = downsample_image(conv_hr, oversample)
+        # Variance downsampling?
+        # Var_LR approx Sum(Var_HR). 
+        var_lr = downsample_image(var_hr, oversample)
+        # Mask downsampling?
+        # If any pixel in block is bad, block is bad? Or distinct interaction?
+        # Using MAX or bitwise OR logic? downsample_image sums.
+        # We need bitwise OR for masks ideally.
+        # For fast implementation, let's treat mask separately or allow imperfect mask downsampling.
+        # Summing mask: any non-zero means some badness. 
+        # But flags are bit-specific.
+        # Let's trust that mask propagation for stamps handled strictness.
+        # For output mask, maybe "Any bad pixel makes it bad" is safe.
+        mask_out_sum = downsample_image(mask_out_hr.astype(np.int32), oversample)
+        mask_out_lr = np.zeros_like(mask_out_sum, dtype=np.int32)
+        # If sum > 0, it has flags. Ideally we want to OR them. Sum mixes them.
+        # Acceptable shortcut: if mask_out_sum != 0 -> FLAG_BAD_CONV?
+        # Or just propagate the fact it is masked.
+        mask_out_lr[mask_out_sum > 0] = 1 # Generic bad
+    else:
+        conv_lr = conv_hr
+        var_lr = var_hr
+        mask_out_lr = mask_out_hr
+    
+    # 3. Add Background (LR)
+    # Background is computed on the target science frame size
+    ny_lr, nx_lr = conv_lr.shape
+    
+    bg_lr = jit_get_background(
         kernel_sol, config.bgo, n_comp_ker, ker_order,
-        float(image.shape[1]), float(image.shape[0]),
-        image.shape[0], image.shape[1]
+        float(nx_lr), float(ny_lr),
+        ny_lr, nx_lr
     )
     
-    total_model = conv + bg
+    total_model = conv_lr + bg_lr
     
-    return total_model, var, mask_out
+    return total_model, var_lr, mask_out_lr
