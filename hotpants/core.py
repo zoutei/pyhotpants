@@ -340,11 +340,6 @@ class Hotpants:
             self.template_substamps = [Substamp(**coords) for coords in t_substamps_coords]
             self.image_substamps = [Substamp(**coords) for coords in i_substamps_coords]
         else:
-            # Pure Python implementation
-            if self.config.verbose >= 1:
-                print(f"DEBUG core.py: pure.utils={pure.utils}", flush=True)
-                print(f"DEBUG core.py: pure.utils.find_stamps={pure.utils.find_stamps}", flush=True)
-            
             # 1. Search in Template
             if self.star_catalog is not None:
                 t_stamps_found = [{'x': float(x), 'y': float(y)} for x, y in self.star_catalog]
@@ -412,12 +407,10 @@ class Hotpants:
         """
         if not self.template_substamps and not self.image_substamps:
             self.find_stamps()
-            
-        if self.config.verbose >= 1:
-            print(f"DEBUG: fit_and_select_direction. Stamps: T={len(self.template_substamps)}, I={len(self.image_substamps)}")
-
+ 
         t_fom, i_fom = float("inf"), float("inf")
         t_fit_results, i_fit_results = [], []
+        conv_direction = self.config.force_convolve
 
         # Create maps for easy lookup of substamp objects by their unique ID
         # Calculate combined error map for weighting (mostly for C extension)
@@ -474,73 +467,74 @@ class Hotpants:
                 scaled_sigmas, 
                 self.config.deg_fixe
             )
-            
+ 
             # 2. Fit Template Stamps -> Match Template(Ref) to Image(Data)
             # Direction 't': We convolve Template. Template is Reference. Image is Data.
-            t_valid = pure.fitting.fit_stamps_locally(self.template_substamps, self.template_data, self.image_data, self.config, basis_funcs, oversample=self.oversample)
-            
-            # Calculate FOM
-            if t_valid:
-                t_fom = np.mean([s.chi2 for s in t_valid])
+            if conv_direction == "t" or conv_direction == "b":
+                t_valid = pure.fitting.fit_stamps_locally(self.template_substamps, self.template_data, self.image_data, self.config, basis_funcs, oversample=self.oversample)
                 
-                # Update status and map results back
-                # Create lookup by (int(x), int(y)) to be safe? 
-                # pure.fitting uses passed coordinates.
-                t_map = {(int(s.x), int(s.y)): s for s in self.template_substamps}
-                
-                t_updated_count = 0
-                for stamp_res in t_valid:
-                    # Find matching substamp
-                    key = (int(stamp_res.x), int(stamp_res.y))
-                    if key in t_map:
-                        substamp = t_map[key]
-                        substamp.status = SubstampStatus.PASSED_FOM_CHECK
-                        substamp.chi2 = float(stamp_res.chi2)
-                        substamp.image_cutout = stamp_res.image_cutout
-                        substamp.template_cutout = stamp_res.template_cutout
-                        substamp.basis_vectors = stamp_res.basis_vectors
-                        substamp.local_kernel_solution = stamp_res.local_solution
-                        substamp.convolved_model_local = stamp_res.convolved_model_local
-                        substamp.fit_results["t"] = {"fom": float(stamp_res.chi2), "chi2": float(stamp_res.chi2)}
-                        t_updated_count += 1
-                if self.config.verbose >= 1:
-                    print(f"DEBUG core.py: Updated status for {t_updated_count}/{len(t_valid)} template stamps.", flush=True)
+                # Calculate FOM
+                if t_valid:
+                    t_fom = np.mean([s.chi2 for s in t_valid])
                     
-            else:
-                t_fom = float('inf')
+                    # Update status and map results back
+                    # Create lookup by (int(x), int(y)) to be safe? 
+                    # pure.fitting uses passed coordinates.
+                    t_map = {(int(s.x), int(s.y)): s for s in self.template_substamps}
+                    
+                    t_updated_count = 0
+                    for stamp_res in t_valid:
+                        # Find matching substamp
+                        key = (int(stamp_res.x), int(stamp_res.y))
+                        if key in t_map:
+                            substamp = t_map[key]
+                            substamp.status = SubstampStatus.PASSED_FOM_CHECK
+                            substamp.chi2 = float(stamp_res.chi2)
+                            substamp.image_cutout = stamp_res.image_cutout
+                            substamp.template_cutout = stamp_res.template_cutout
+                            substamp.basis_vectors = stamp_res.basis_vectors
+                            substamp.local_kernel_solution = stamp_res.local_solution
+                            substamp.convolved_model_local = stamp_res.convolved_model_local
+                            substamp.fit_results["t"] = {"fom": float(stamp_res.chi2), "chi2": float(stamp_res.chi2)}
+                            t_updated_count += 1
+                    if self.config.verbose >= 1:
+                        print(f"DEBUG core.py: Updated status for {t_updated_count}/{len(t_valid)} template stamps.", flush=True)
+                        
+                else:
+                    t_fom = float('inf')
 
             # 3. Fit Image Stamps -> Match Image(Ref) to Template(Data)
             # Direction 'i': We convolve Image. Image is Reference. Template is Data.
-            i_valid = pure.fitting.fit_stamps_locally(self.image_substamps, self.image_data, self.template_data, self.config, basis_funcs)
-            
-            if i_valid:
-                i_fom = np.mean([s.chi2 for s in i_valid])
+            if conv_direction == "i" or conv_direction == "b":
+                i_valid = pure.fitting.fit_stamps_locally(self.image_substamps, self.image_data, self.template_data, self.config, basis_funcs)
                 
-                i_map = {(int(s.x), int(s.y)): s for s in self.image_substamps}
-                
-                i_updated_count = 0
-                for stamp_res in i_valid:
-                    key = (int(stamp_res.x), int(stamp_res.y))
-                    if key in i_map:
-                        substamp = i_map[key]
-                        substamp.status = SubstampStatus.PASSED_FOM_CHECK
-                        substamp.chi2 = float(stamp_res.chi2)
-                        substamp.image_cutout = stamp_res.image_cutout
-                        substamp.template_cutout = stamp_res.template_cutout
-                        substamp.basis_vectors = stamp_res.basis_vectors
-                        substamp.local_kernel_solution = stamp_res.local_solution
-                        substamp.convolved_model_local = stamp_res.convolved_model_local
-                        substamp.fit_results["i"] = {"fom": float(stamp_res.chi2), "chi2": float(stamp_res.chi2)}
-                        i_updated_count += 1
-                if self.config.verbose >= 1:
-                    print(f"DEBUG core.py: Updated status for {i_updated_count}/{len(i_valid)} image stamps.", flush=True)
-                        
-            else:
-                i_fom = float('inf')
+                if i_valid:
+                    i_fom = np.mean([s.chi2 for s in i_valid])
+                    
+                    i_map = {(int(s.x), int(s.y)): s for s in self.image_substamps}
+                    
+                    i_updated_count = 0
+                    for stamp_res in i_valid:
+                        key = (int(stamp_res.x), int(stamp_res.y))
+                        if key in i_map:
+                            substamp = i_map[key]
+                            substamp.status = SubstampStatus.PASSED_FOM_CHECK
+                            substamp.chi2 = float(stamp_res.chi2)
+                            substamp.image_cutout = stamp_res.image_cutout
+                            substamp.template_cutout = stamp_res.template_cutout
+                            substamp.basis_vectors = stamp_res.basis_vectors
+                            substamp.local_kernel_solution = stamp_res.local_solution
+                            substamp.convolved_model_local = stamp_res.convolved_model_local
+                            substamp.fit_results["i"] = {"fom": float(stamp_res.chi2), "chi2": float(stamp_res.chi2)}
+                            i_updated_count += 1
+                    if self.config.verbose >= 1:
+                        print(f"DEBUG core.py: Updated status for {i_updated_count}/{len(i_valid)} image stamps.", flush=True)
+ 
+                else:
+                    i_fom = float('inf')
 
 
         # Select best direction
-        conv_direction = self.config.force_convolve
         if conv_direction == "b":
             conv_direction = "t" if t_fom < i_fom else "i"
             if self.config.verbose >= 1:
@@ -770,6 +764,7 @@ class Hotpants:
 
         if self.use_c_extension:
             convolved_image, output_mask, conv_noise_sq = self.ext.apply_kernel(self._c_state, image_to_convolve, self.results["kernel_solution"], noise_to_convolve_sq)
+            bkg = self.ext.get_background_image(self._c_state, self.results["kernel_solution"])
         else:
             # Pure Python Convolution
             # 1. Calculate Basis Functions
@@ -787,7 +782,7 @@ class Hotpants:
             basis_vecs = np.array(basis_funcs)
             
             # 3. Apply Kernel
-            convolved_image, conv_noise_sq, output_mask_conv = pure.convolution.apply_kernel(
+            convolved_image, bkg, conv_noise_sq, output_mask_conv = pure.convolution.apply_kernel(
                 image_to_convolve, self.results["kernel_solution"], 
                 noise_to_convolve_sq, mask, 
                 self.config, basis_vecs,
@@ -798,9 +793,7 @@ class Hotpants:
             # Hotpants C logic: convolve returns modified mask.
             output_mask = output_mask_conv
 
-        if self.use_c_extension:
-            bkg = self.ext.get_background_image(self._c_state, self.results["kernel_solution"])
-            convolved_image += bkg
+        convolved_image += bkg
 
         diff_image = target_image - convolved_image
         final_noise = np.sqrt(conv_noise_sq + target_noise_sq)
@@ -838,7 +831,7 @@ class Hotpants:
         if self.config.verbose >= 1:
             print("Applying final masks to outputs and calculating statistics...")
 
-        final_diff, final_conv, final_noise, output_mask = (self.results["diff_image"].copy(), self.results["convolved_image"].copy(), self.results["noise_image"].copy(), self.results["output_mask"].copy())
+        final_diff, final_conv, final_bkg, final_noise, output_mask = (self.results["diff_image"].copy(), self.results["convolved_image"].copy(), self.results["background"].copy(), self.results["noise_image"].copy(), self.results["output_mask"].copy())
         bad_pixels = output_mask != 0
         final_diff[bad_pixels] = self.config.fillval
         final_conv[bad_pixels] = self.config.fillval
@@ -874,6 +867,7 @@ class Hotpants:
         return {
             "diff_image": final_diff,
             "convolved_image": final_conv,
+            "background": final_bkg,
             "noise_image": final_noise,
             "output_mask": output_mask,
             "stats": self.results["stats"],

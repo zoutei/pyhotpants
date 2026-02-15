@@ -43,7 +43,7 @@ def fit_stamps_locally(stamps, template, image, config, kernel_vecs, oversample=
     
     # Constants
     n_comp_ker = len(kernel_vecs)
-    bg_order = config.bgo
+    bg_order = 0 # config.bgo
     
     # Generate Spatial Polynomials (Global) ?
     # No, for local fit we essentially assume constant spatial variation LOCALLY
@@ -143,6 +143,8 @@ def fit_stamps_locally(stamps, template, image, config, kernel_vecs, oversample=
             continue
             
         template_patch = template[y0_t_hr:y1_t_hr, x0_t_hr:x1_t_hr]
+
+        stamp.template_cutout = template_patch.copy()
         
         # 3. Convolve to get Basis Vectors (V)
         # kernel_vecs are the basis functions.
@@ -232,8 +234,8 @@ def fit_stamps_locally(stamps, template, image, config, kernel_vecs, oversample=
             valid_stamps.append(stamp)
             
             # Debug Local Fit
-            if config.verbose >= 2 and idx < 5:
-                print(f"DEBUG: Local Fit Stamp {idx}: Norm={stamp.norm:.4f}, Chi2={stamp.chi2:.4f}, ModelMean={np.mean(model_vec):.4f}, DataMean={np.mean(stamp.substamp):.4f}")
+            # if config.verbose >= 2 and idx < 5:
+            #     print(f"DEBUG: Local Fit Stamp {idx}: Norm={stamp.norm:.4f}, Chi2={stamp.chi2:.4f}, ModelMean={np.mean(model_vec):.4f}, DataMean={np.mean(stamp.substamp):.4f}")
             
         except np.linalg.LinAlgError:
             continue
