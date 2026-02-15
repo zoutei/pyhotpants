@@ -673,7 +673,8 @@ class Hotpants:
                 self.image_data, 
                 self.config, 
                 basis_funcs,
-                oversample=oversample_param
+                oversample=oversample_param,
+                verbose=self.config.verbose
             )
             
             if kernel_sol is None:
@@ -686,9 +687,10 @@ class Hotpants:
             active_map = {s.orig_idx: s for s in active_internal_stamps}
             
             # Always print for debugging
-            print(f"DEBUG: Mapping {len(active_map)} internal stamps back to {len(candidate_substamps)} candidates.")
-            if len(active_map) > 0:
-                 print(f"DEBUG: Sample active keys: {list(active_map.keys())[:10]}")
+            if self.config.verbose >= 1:
+                print(f"DEBUG: Mapping {len(active_map)} internal stamps back to {len(candidate_substamps)} candidates.")
+                if len(active_map) > 0:
+                     print(f"DEBUG: Sample active keys: {list(active_map.keys())[:10]}")
             
             valid_list = []
             for i, s in enumerate(candidate_substamps):
@@ -705,8 +707,9 @@ class Hotpants:
                     valid_list.append(s)
                 else:
                     s.status = SubstampStatus.REJECTED_ITERATIVE_FIT
-            
-            print(f"DEBUG: valid_list length: {len(valid_list)}")
+            if self.config.verbose >= 1:
+                print(f"Iterative fit selected {len(valid_list)} substamps for final kernel solution.") 
+                print(f"DEBUG: valid_list length: {len(valid_list)}")
             
             return kernel_sol, valid_list
 

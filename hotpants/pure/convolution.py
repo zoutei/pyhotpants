@@ -138,9 +138,9 @@ def jit_spatial_convolve(image, kernel_sol, variance, mask,
                     mbit = 0
                     
                     for jc in range(j - hw_kernel, j + hw_kernel + 1):
-                        jk = j - jc + hw_kernel 
+                        jk = jc - j + hw_kernel 
                         for ic in range(i - hw_kernel, i + hw_kernel + 1):
-                            ik = i - ic + hw_kernel 
+                            ik = ic - i + hw_kernel 
                             kk = local_kernel[jk, ik]
                             
                             val = image[jc, ic]
