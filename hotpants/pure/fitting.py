@@ -29,213 +29,142 @@ class Stamp:
         self.sscnt = 0 
         self.nss = 1
 
-def fit_stamps_locally(stamps, template, image, config, kernel_vecs, oversample=1):
+def populate_stamp_vectors(stamp, template, image, config, kernel_vecs, oversample=1):
     """
-    Perform initial local fit on stamps to reject outliers.
-    Matches check_stamps in alard.c.
-    Returns: List of valid Stamp objects with vectors pre-calculated.
-    
-    If oversample > 1, template is assumed to be High-Res (shape ~ oversample * image.shape).
-    kernel_vecs must be High-Res basis functions.
-    convolution is performed in High-Res, then result is downsampled to Low-Res for fitting.
+    Populates the stamp with data, template, and basis vectors.
+    Returns True if successful, False if stamp is out of bounds or invalid.
     """
-    good_stamps = []
-    
-    # Constants
-    n_comp_ker = len(kernel_vecs)
-    bg_order = 0 # config.bgo
-    
-    # Generate Spatial Polynomials (Global) ?
-    # No, for local fit we essentially assume constant spatial variation LOCALLY
-    # or we construct the FULL vector set including spatial vars?
-    # alard.c check_stamps calls fillStamp.
-    # fillStamp constructs vectors for ALL spatial variations?
-    # No. 
-    # check_stamps uses `build_matrix0` (local matrix). 
-    # `build_matrix0` uses `vectors`.
-    # `vectors` in `fillStamp` are:
-    #   Outer Loop: Gaussian Bases.
-    #     Inner Loop: Spatial Decomp (deg_fixe).
-    #       `xy_conv_stamp`.
-    # Wait, `xy_conv_stamp` generates ONE vector per Gaussian*Degree component.
-    # These ARE the basis vectors.
-    # My `kernel_vecs` are the PRE-COMBINED Basis Functions (Gaussian * Poly_degree).
-    # So `n_comp_ker` is the number of basis functions.
-    # Yes.
-    
-    # Background vectors?
-    # `fillStamp` adds background polys.
-    # We should add them too.
-    
     half_stamp = config.rss
-    half_r = config.rkernel
-    # If oversample > 1, the kernel radius in HR pixels is larger
-    # But half_r comes from config. In pure python flow we likely update config or pass scaled versions?
-    # Actually, if we use HR basis functions, `kernel_vecs` already have the HR size.
-    # The padding needed in Template image is defined by the kernel size.
-    # We should infer HR kernel radius from the basis vectors provided.
-    
+    # Determine kernel radius in HR pixels
     h_basis_hr, w_basis_hr = kernel_vecs[0].shape
     half_r_hr = w_basis_hr // 2
     
-    # half_stamp is in LOW RES pixels (defined by grid on Science Image).
+    n_comp_ker = len(kernel_vecs)
+    bg_order = config.bgo
     
+    # 1. Extract Data (Image)
+    y, x = stamp.y, stamp.x
+    y0 = int(y - half_stamp)
+    y1 = int(y + half_stamp + 1)
+    x0 = int(x - half_stamp)
+    x1 = int(x + half_stamp + 1)
+    
+    if y0 < 0 or x0 < 0 or y1 > image.shape[0] or x1 > image.shape[1]:
+        return False
+        
+    data_stamp = image[y0:y1, x0:x1]
+    if np.any(np.isnan(data_stamp)):
+        return False # Reject stamps with NaNs in data
+        
+    stamp.substamp = data_stamp.flatten()
+    stamp.image_cutout = data_stamp.copy()
+    
+    # 2. Extract Template Patch
+    # HR extraction logic
+    y0_t_hr = int(y0 * oversample - half_r_hr)
+    y1_t_hr = int(y1 * oversample + half_r_hr)
+    x0_t_hr = int(x0 * oversample - half_r_hr)
+    x1_t_hr = int(x1 * oversample + half_r_hr)
+    
+    if y0_t_hr < 0 or x0_t_hr < 0 or y1_t_hr > template.shape[0] or x1_t_hr > template.shape[1]:
+        return False
+        
+    template_patch = template[y0_t_hr:y1_t_hr, x0_t_hr:x1_t_hr]
+    if np.any(np.isnan(template_patch)):
+        return False
+        
+    stamp.template_cutout = template_patch.copy()
+    
+    # 3. generate Basis Vectors
+    vectors = []
+    basis_cutouts = []
+    
+    for k in range(n_comp_ker):
+        basis_k = kernel_vecs[k]
+        conv_res_hr = jit_convolve_patch(template_patch, basis_k)
+        
+        if oversample > 1:
+            conv_res = downsample_image(conv_res_hr, oversample)
+        else:
+            conv_res = conv_res_hr
+            
+        # Verify shape
+        if conv_res.shape != data_stamp.shape:
+            # Should not happen if logic is correct
+            return False
+            
+        v = conv_res.flatten()
+        vectors.append(v)
+        basis_cutouts.append(conv_res)
+        
+    # 4. Background Vectors
+    nx_glob = template.shape[1] / oversample
+    ny_glob = template.shape[0] / oversample
+    
+    gy, gx = np.indices(data_stamp.shape)
+    gy = gy + y0
+    gx = gx + x0
+    
+    ny_norm = (gy - 0.5 * ny_glob) / (0.5 * ny_glob)
+    nx_norm = (gx - 0.5 * nx_glob) / (0.5 * nx_glob)
+    
+    for d in range(bg_order + 1):
+        for dx in range(d + 1):
+            dy = d - dx
+            bg_v = (nx_norm ** dx) * (ny_norm ** dy)
+            vectors.append(bg_v.flatten())
+            
+    stamp.vectors = np.array(vectors)
+    stamp.basis_vectors = np.array(basis_cutouts)
+    
+    if np.any(np.isnan(stamp.vectors)):
+        return False
+        
+    return True
+
+def fit_stamps_locally(stamps, template, image, config, kernel_vecs, oversample=1):
+    """
+    Perform initial local fit on stamps to reject outliers.
+    """
     valid_stamps = []
+    n_comp_ker = len(kernel_vecs)
     
     for idx, s_obj in enumerate(stamps):
-        # 1. Extract Data (Image) - RHS
-        # The Image to be matched (Difference = Template*K - Image)
-        # We model Image as Template*K.
-        # So `b` = Template_Basis * Image.
+        # Create Internal Stamp
+        stamp = Stamp(s_obj.x, s_obj.y, orig_idx=idx)
         
-        # We need to extract the stamp from IMAGE.
-        # (Assuming s_obj has x, y)
-        y, x = s_obj.y, s_obj.x
-        
-        stamp = Stamp(x, y, orig_idx=idx)
-        
-        # Safe slices
-        y0 = int(y - half_stamp)
-        y1 = int(y + half_stamp + 1)
-        x0 = int(x - half_stamp)
-        x1 = int(x + half_stamp + 1)
-        
-        # Padding bounds for generic safety
-        # We leave this to caller usually, but here:
-        if y0 < 0 or x0 < 0 or y1 > image.shape[0] or x1 > image.shape[1]:
+        # Populate Vectors
+        if not populate_stamp_vectors(stamp, template, image, config, kernel_vecs, oversample):
             continue
             
-        # Extract Data Stamp (I)
-        data_stamp = image[y0:y1, x0:x1]
-        stamp.substamp = data_stamp.flatten()
-        stamp.image_cutout = data_stamp.copy()
-        
-        # 2. Extract Template Patch (T) - For Convolutions
-        # Needs kernel padding
-        # If oversample > 1, we work in HR coordinates for Template extraction
-        
-        # Center in HR coords
-        # Shift x, y by 0.5 before scaling to center on the pixel grid?
-        # Standard: Center of pixel (x,y) in LR corresponds to center of pixel block in HR.
-        # Pixel (0,0) LR covers [0, F) x [0, F) HR. Center at F/2 - 0.5.
-        # Let's assume simplified: Output x aligns with Input x * F.
-        
-        # LR Slice: [y0, y1)
-        # HR Slice: [y0*F, y1*F)
-        # Plus Kernel Padding in HR pixels.
-        
-        y0_t_hr = int(y0 * oversample - half_r_hr)
-        y1_t_hr = int(y1 * oversample + half_r_hr) # No +1 needed? 
-        # Wait, convolution output size = Input - Kernel + 1
-        # We want Output Size = (y1-y0)*oversample.
-        # So Input Size must be Output + Kernel - 1.
-        # Let's verify:
-        # target_hr_h = (y1 - y0) * oversample
-        # needed_input_h = target_hr_h + (2*half_r_hr) 
-        
-        # So we range from y0*oversample - half_r_hr TO y1*oversample + half_r_hr
-        # Height = (y1*F + R) - (y0*F - R) = (y1-y0)F + 2R. Correct.
-        
-        x0_t_hr = int(x0 * oversample - half_r_hr)
-        x1_t_hr = int(x1 * oversample + half_r_hr)
-        
-        if y0_t_hr < 0 or x0_t_hr < 0 or y1_t_hr > template.shape[0] or x1_t_hr > template.shape[1]:
-            continue
-            
-        template_patch = template[y0_t_hr:y1_t_hr, x0_t_hr:x1_t_hr]
-
-        stamp.template_cutout = template_patch.copy()
-        
-        # 3. Convolve to get Basis Vectors (V)
-        # kernel_vecs are the basis functions.
-        vectors = []
-        basis_cutouts = [] # These will be LR now
-        vec0 = None
-        
-        for k in range(n_comp_ker):
-            basis_k = kernel_vecs[k]
-            # Convolve Template Patch with Basis
-            # result size should match data stamp * oversample
-            conv_res_hr = jit_convolve_patch(template_patch, basis_k)
-            
-            # Downsample to LR
-            if oversample > 1:
-                conv_res = downsample_image(conv_res_hr, oversample)
-            else:
-                conv_res = conv_res_hr
-            
-            # Store
-            v = conv_res.flatten()
-            vectors.append(v)
-            basis_cutouts.append(conv_res)
-            
-            if k == 0: 
-                vec0 = v
-                if idx < 2:
-                     print(f"DEBUG: Stamp {idx} Basis 0: BasisSum={np.sum(basis_k):.4f}, TemplateMean={np.mean(template_patch):.4f}, ConvMean={np.mean(conv_res):.4f}, VecMax={np.max(v):.4f}")
-
-            
-        # 4. Background Vectors
-        # x^i y^j on the stamp grid
-        # Center of stamp is 0,0 locally?
-        # alard.c `fillStamp`:
-        # xf = (i - rPixX2) / rPixX2. GLOBAL coords.
-        
-        nx_glob = template.shape[1]
-        ny_glob = template.shape[0]
-        
-        gy, gx = np.indices(data_stamp.shape)
-        # Shift to global coords
-        gy = gy + y0
-        gx = gx + x0
-        
-        # Normalize [-1, 1]
-        ny_norm = (gy - 0.5 * ny_glob) / (0.5 * ny_glob)
-        nx_norm = (gx - 0.5 * nx_glob) / (0.5 * nx_glob)
-        
-        for d in range(bg_order + 1):
-            for dx in range(d + 1):
-                dy = d - dx
-                bg_v = (nx_norm ** dx) * (ny_norm ** dy)
-                vectors.append(bg_v.flatten())
-                
-        stamp.vectors = np.array(vectors) # (n_params, n_pix)
-        stamp.basis_vectors = np.array(basis_cutouts)
-        
         # 5. Local Fit
-        # Matrix M = V @ V.T
-        # RHS b = V @ I
+        # Slice for Local Fit: Kernel Basis + Constant Background
+        n_fit = n_comp_ker + 1 
         
-        M = stamp.vectors @ stamp.vectors.T
-        b = stamp.vectors @ stamp.substamp
+        vectors_fit = stamp.vectors[:n_fit]
+        M_fit = vectors_fit @ vectors_fit.T
+        b_fit = vectors_fit @ stamp.substamp
         
         try:
-            # Solve
-            # Use pseudoinverse or robust solve?
-            # alard.c uses ludcmp.
-            coeffs = np.linalg.solve(M, b)
+            coeffs_fit = np.linalg.solve(M_fit, b_fit)
             
-            # Kernel Sum (sum of first n_comp_ker coeffs)
-            # wait, basis 0 is normalized sum=1? 
-            # In kernel.py we normalized basis.
-            # So sum(Kernel) = sum(coeffs).
+            coeffs = np.zeros(len(stamp.vectors))
+            coeffs[:n_fit] = coeffs_fit
             
-            # The background coeffs shouldn't be included.
             k_sum = np.sum(coeffs[:n_comp_ker])
             stamp.norm = k_sum
-            stamp.local_solution = coeffs
+            stamp.local_solution = coeffs[:n_fit]
 
             model_vec = coeffs @ stamp.vectors
             resid_vec = stamp.substamp - model_vec
             stamp.residuals = resid_vec
             stamp.chi2 = float(np.sqrt(np.mean(resid_vec * resid_vec)))
-            stamp.convolved_model_local = model_vec.reshape(data_stamp.shape)
+            stamp.convolved_model_local = model_vec.reshape(stamp.image_cutout.shape)
+            
+            if np.isnan(stamp.chi2) or np.isnan(stamp.norm):
+                continue
             
             valid_stamps.append(stamp)
-            
-            # Debug Local Fit
-            # if config.verbose >= 2 and idx < 5:
-            #     print(f"DEBUG: Local Fit Stamp {idx}: Norm={stamp.norm:.4f}, Chi2={stamp.chi2:.4f}, ModelMean={np.mean(model_vec):.4f}, DataMean={np.mean(stamp.substamp):.4f}")
             
         except np.linalg.LinAlgError:
             continue
@@ -248,7 +177,7 @@ def fit_stamps_locally(stamps, template, image, config, kernel_vecs, oversample=
     
     # Iterative clipping
     mask = np.ones(len(k_sums), dtype=bool)
-    for _ in range(10): # 10 iter default
+    for _ in range(10): 
         curr_sums = k_sums[mask]
         if len(curr_sums) < 2: break
         
@@ -257,23 +186,7 @@ def fit_stamps_locally(stamps, template, image, config, kernel_vecs, oversample=
         
         if std == 0: break
         
-        # Reject outliers > statSig (e.g. 3 or 10?)
-        # alard.c check_stamps uses sigma_clip with 10 iters.
-        # rejection threshold?
-        # It calculates diff = abs(val - mean) / std.
-        # If diff > threshold?
-        # It just stores diff.
-        # "stamps[i].diff = fabs((stamps[i].norm - kmean) / kstdev);"
-        # The rejection happens in MAIN usually, or by sorting?
-        # `check_stamps` in alard.c allows user to reject based on this?
-        # No, `check_stamps` essentially seeds `diff`.
-        # `fitKernel` uses `stamps` but might skip if `diff` is high?
-        # Actually `check_stamps` just computes stats.
-        
-        # Let's perform a simple 3-sigma clip to Mark BAD stamps
-        # User kerSigReject ?
-        sig_reject = 3.0 # Default
-        
+        sig_reject = 3.0 
         bad = np.abs(k_sums - mean) > sig_reject * std
         mask[bad] = False
         
@@ -381,7 +294,7 @@ def build_rhs_numba(n_comp_kernel, n_spatial, n_bg,
             
     return b
 
-def fit_kernel(stamps, template, image, config, kernel_vecs, oversample=1):
+def fit_kernel(stamps, template, image, config, kernel_vecs, oversample=1, verbose=0):
     """
     Main Fitting Driver.
     """
@@ -432,8 +345,9 @@ def fit_kernel(stamps, template, image, config, kernel_vecs, oversample=1):
         if n_active == 0:
             print("No stamps left!")
             break
-            
-        print(f"DEBUG: Iteration {iteration} - Active Stamps: {n_active}")
+        
+        if verbose >= 2:
+            print(f"DEBUG: Iteration {iteration} - Active Stamps: {n_active}")
             
         # Pack Data for Numba
         s_vectors = np.stack([s.vectors for s in active_stamps]) # (n_stamps, n_vec, n_pix)
@@ -460,23 +374,26 @@ def fit_kernel(stamps, template, image, config, kernel_vecs, oversample=1):
             # Broadcasting: (N, N) * (N, 1) * (1, N)
             A_scaled = A * scale[:, None] * scale[None, :]
             b_scaled = b * scale
-            
-            if iteration == 0:
-                 print(f"DEBUG: Pre-scaling A_00={A[0,0]:.2e}, b_0={b[0]:.2e}")
+
+            if verbose >= 2: 
+                if iteration == 0:
+                    print(f"DEBUG: Pre-scaling A_00={A[0,0]:.2e}, b_0={b[0]:.2e}")
             
             # Use lstsq with machine precision threshold
             x_scaled, residuals, rank, s = np.linalg.lstsq(A_scaled, b_scaled, rcond=None)
             
-            if iteration == 0:
-                 print(f"DEBUG: Scaled A cond={s[0]/s[-1]:.2e}, rank={rank}, max_sv={s[0]:.2e}, min_sv={s[-1]:.2e}")
-            
+            if verbose >= 2:
+                if iteration == 0:
+                    print(f"DEBUG: Scaled A cond={s[0]/s[-1]:.2e}, rank={rank}, max_sv={s[0]:.2e}, min_sv={s[-1]:.2e}")
+                
             # Recover solution: x = D^-1 * x_scaled
             solution = x_scaled * scale
             
-            print(f"DEBUG: Iter {iteration} Solution[:10]: {solution[:10]}")
-            print(f"DEBUG: Iter {iteration} b[:10]: {b[:10]}")
-            print(f"DEBUG: Iter {iteration} Solution[430:440]: {solution[430:440]}")
-            print(f"DEBUG: Iter {iteration} b[430:440]: {b[430:440]}")
+            if verbose >= 2:
+                print(f"DEBUG: Iter {iteration} Solution[:10]: {solution[:10]}")
+                print(f"DEBUG: Iter {iteration} b[:10]: {b[:10]}")
+                print(f"DEBUG: Iter {iteration} Solution[430:440]: {solution[430:440]}")
+                print(f"DEBUG: Iter {iteration} b[430:440]: {b[430:440]}")
 
         except np.linalg.LinAlgError:
             print("Singular matrix")
