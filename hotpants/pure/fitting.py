@@ -4,11 +4,13 @@ from numba import njit, prange
 import scipy.linalg
 from .convolution import jit_xy_conv_stamp, jit_make_kernel, jit_convolve_patch
 from .kernel import get_spatial_polynomials
+from .utils import downsample_image
 
 class Stamp:
-    def __init__(self, x, y, data=None):
+    def __init__(self, x, y, data=None, orig_idx=None):
         self.x = int(x)
         self.y = int(y)
+        self.orig_idx = orig_idx # Track original index from input list
         self.vectors = None # (n_vecs, n_pix)
         self.basis_vectors = None  # (n_basis, h, w)
         self.substamp = None  # The DATA (I) stamp (n_pix,)
@@ -27,11 +29,15 @@ class Stamp:
         self.sscnt = 0 
         self.nss = 1
 
-def fit_stamps_locally(stamps, template, image, config, kernel_vecs):
+def fit_stamps_locally(stamps, template, image, config, kernel_vecs, oversample=1):
     """
     Perform initial local fit on stamps to reject outliers.
     Matches check_stamps in alard.c.
     Returns: List of valid Stamp objects with vectors pre-calculated.
+    
+    If oversample > 1, template is assumed to be High-Res (shape ~ oversample * image.shape).
+    kernel_vecs must be High-Res basis functions.
+    convolution is performed in High-Res, then result is downsampled to Low-Res for fitting.
     """
     good_stamps = []
     
@@ -63,14 +69,20 @@ def fit_stamps_locally(stamps, template, image, config, kernel_vecs):
     
     half_stamp = config.rss
     half_r = config.rkernel
-    fw_stamp = 2*half_stamp + 1
+    # If oversample > 1, the kernel radius in HR pixels is larger
+    # But half_r comes from config. In pure python flow we likely update config or pass scaled versions?
+    # Actually, if we use HR basis functions, `kernel_vecs` already have the HR size.
+    # The padding needed in Template image is defined by the kernel size.
+    # We should infer HR kernel radius from the basis vectors provided.
     
-    # Pre-calculate spatial weights for Global Fit later?
-    # No, compute per stamp.
+    h_basis_hr, w_basis_hr = kernel_vecs[0].shape
+    half_r_hr = w_basis_hr // 2
+    
+    # half_stamp is in LOW RES pixels (defined by grid on Science Image).
     
     valid_stamps = []
     
-    for s_obj in stamps:
+    for idx, s_obj in enumerate(stamps):
         # 1. Extract Data (Image) - RHS
         # The Image to be matched (Difference = Template*K - Image)
         # We model Image as Template*K.
@@ -80,7 +92,7 @@ def fit_stamps_locally(stamps, template, image, config, kernel_vecs):
         # (Assuming s_obj has x, y)
         y, x = s_obj.y, s_obj.x
         
-        stamp = Stamp(x, y)
+        stamp = Stamp(x, y, orig_idx=idx)
         
         # Safe slices
         y0 = int(y - half_stamp)
@@ -100,34 +112,66 @@ def fit_stamps_locally(stamps, template, image, config, kernel_vecs):
         
         # 2. Extract Template Patch (T) - For Convolutions
         # Needs kernel padding
-        y0_t = int(y - half_stamp - half_r)
-        y1_t = int(y + half_stamp + half_r + 1)
-        x0_t = int(x - half_stamp - half_r)
-        x1_t = int(x + half_stamp + half_r + 1)
+        # If oversample > 1, we work in HR coordinates for Template extraction
         
-        if y0_t < 0 or x0_t < 0 or y1_t > template.shape[0] or x1_t > template.shape[1]:
+        # Center in HR coords
+        # Shift x, y by 0.5 before scaling to center on the pixel grid?
+        # Standard: Center of pixel (x,y) in LR corresponds to center of pixel block in HR.
+        # Pixel (0,0) LR covers [0, F) x [0, F) HR. Center at F/2 - 0.5.
+        # Let's assume simplified: Output x aligns with Input x * F.
+        
+        # LR Slice: [y0, y1)
+        # HR Slice: [y0*F, y1*F)
+        # Plus Kernel Padding in HR pixels.
+        
+        y0_t_hr = int(y0 * oversample - half_r_hr)
+        y1_t_hr = int(y1 * oversample + half_r_hr) # No +1 needed? 
+        # Wait, convolution output size = Input - Kernel + 1
+        # We want Output Size = (y1-y0)*oversample.
+        # So Input Size must be Output + Kernel - 1.
+        # Let's verify:
+        # target_hr_h = (y1 - y0) * oversample
+        # needed_input_h = target_hr_h + (2*half_r_hr) 
+        
+        # So we range from y0*oversample - half_r_hr TO y1*oversample + half_r_hr
+        # Height = (y1*F + R) - (y0*F - R) = (y1-y0)F + 2R. Correct.
+        
+        x0_t_hr = int(x0 * oversample - half_r_hr)
+        x1_t_hr = int(x1 * oversample + half_r_hr)
+        
+        if y0_t_hr < 0 or x0_t_hr < 0 or y1_t_hr > template.shape[0] or x1_t_hr > template.shape[1]:
             continue
             
-        template_patch = template[y0_t:y1_t, x0_t:x1_t]
-        stamp.template_cutout = template[y0:y1, x0:x1].copy()
+        template_patch = template[y0_t_hr:y1_t_hr, x0_t_hr:x1_t_hr]
         
         # 3. Convolve to get Basis Vectors (V)
         # kernel_vecs are the basis functions.
         vectors = []
-        basis_cutouts = []
+        basis_cutouts = [] # These will be LR now
         vec0 = None
         
         for k in range(n_comp_ker):
             basis_k = kernel_vecs[k]
             # Convolve Template Patch with Basis
-            # result size should match data stamp (fw_stamp)
-            conv_res = jit_convolve_patch(template_patch, basis_k)
+            # result size should match data stamp * oversample
+            conv_res_hr = jit_convolve_patch(template_patch, basis_k)
+            
+            # Downsample to LR
+            if oversample > 1:
+                conv_res = downsample_image(conv_res_hr, oversample)
+            else:
+                conv_res = conv_res_hr
             
             # Store
             v = conv_res.flatten()
             vectors.append(v)
             basis_cutouts.append(conv_res)
-            if k == 0: vec0 = v
+            
+            if k == 0: 
+                vec0 = v
+                if idx < 2:
+                     print(f"DEBUG: Stamp {idx} Basis 0: BasisSum={np.sum(basis_k):.4f}, TemplateMean={np.mean(template_patch):.4f}, ConvMean={np.mean(conv_res):.4f}, VecMax={np.max(v):.4f}")
+
             
         # 4. Background Vectors
         # x^i y^j on the stamp grid
@@ -187,6 +231,10 @@ def fit_stamps_locally(stamps, template, image, config, kernel_vecs):
             
             valid_stamps.append(stamp)
             
+            # Debug Local Fit
+            if config.verbose >= 2 and idx < 5:
+                print(f"DEBUG: Local Fit Stamp {idx}: Norm={stamp.norm:.4f}, Chi2={stamp.chi2:.4f}, ModelMean={np.mean(model_vec):.4f}, DataMean={np.mean(stamp.substamp):.4f}")
+            
         except np.linalg.LinAlgError:
             continue
             
@@ -237,31 +285,6 @@ def fit_stamps_locally(stamps, template, image, config, kernel_vecs):
     return valid_stamps
 
 @njit(cache=True)
-def jit_convolve_patch(image, kernel):
-    """
-    Simple 2D convolution for patches.
-    Output size = Input size - Kernel size + 1.
-    """
-    input_h, input_w = image.shape
-    kh, kw = kernel.shape
-    out_h = input_h - kh + 1
-    out_w = input_w - kw + 1
-    
-    output = np.zeros((out_h, out_w))
-    
-    for y in range(out_h):
-        for x in range(out_w):
-            val = 0.0
-            for ky in range(kh):
-                for kx in range(kw):
-                    # Standard convolution: image[y+ky, x+kx] * kernel[ky, kx]
-                    # This assumes kernel is flipped or correlation is intended.
-                    # Hotpants uses "correlation" style usually if kernel is PSF.
-                    val += image[y+ky, x+kx] * kernel[ky, kx]
-            output[y, x] = val
-    return output
-
-@njit(cache=True)
 def build_matrix_numba(n_comp_kernel, n_spatial, n_bg, 
                        stamp_vectors, stamp_weights, 
                        n_stamps, n_params):
@@ -287,45 +310,31 @@ def build_matrix_numba(n_comp_kernel, n_spatial, n_bg,
         
         M = vecs @ vecs.T 
         
-        # 1. Constant Basis (Basis 0) -> Index 0
-        A[0, 0] += M[0, 0]
-        
-        # 2. Variable Bases
-        # Basis k (1..M-1)
-        for k in range(1, n_comp_kernel):
+        # 1. Variable Bases (All Bases 0..M-1 vary spatially)
+        for k in range(n_comp_kernel):
             for p in range(n_spatial):
                 # row index for Basis k, Poly p
-                row_idx = 1 + (k - 1) * n_spatial + p
+                row_idx = k * n_spatial + p
                 
-                # Cross term with Basis 0
-                # A[row, 0] += w[p] * dot(B_k, B_0)
-                term_0 = wxy[p] * M[k, 0]
-                A[row_idx, 0] += term_0
-                A[0, row_idx] += term_0
-                
-                # Cross term with other variable bases
-                for l in range(1, n_comp_kernel):
+                # Matched with other bases
+                for l in range(n_comp_kernel):
                     for q in range(n_spatial):
-                        col_idx = 1 + (l - 1) * n_spatial + q
+                         col_idx = l * n_spatial + q
+                         
+                         val = wxy[p] * wxy[q] * M[k, l]
+                         A[row_idx, col_idx] += val
                         
-                        val = wxy[p] * wxy[q] * M[k, l]
-                        A[row_idx, col_idx] += val
-                        
-        # 3. Background
-        bg_start_idx = 1 + (n_comp_kernel - 1) * n_spatial
+        # 2. Background
+        bg_start_idx = n_comp_kernel * n_spatial
         
         for ib in range(n_bg):
             row_idx = bg_start_idx + ib
             vec_idx = n_comp_kernel + ib
             
-            # Cross term with Basis 0
-            A[row_idx, 0] += M[vec_idx, 0]
-            A[0, row_idx] += M[vec_idx, 0]
-            
             # Cross term with Variable Kernel
-            for k in range(1, n_comp_kernel):
+            for k in range(n_comp_kernel):
                 for p in range(n_spatial):
-                    col_idx = 1 + (k - 1) * n_spatial + p
+                    col_idx = k * n_spatial + p
                     
                     val = M[vec_idx, k] * wxy[p]
                     A[row_idx, col_idx] += val
@@ -356,29 +365,26 @@ def build_rhs_numba(n_comp_kernel, n_spatial, n_bg,
         
         P = vecs @ data
         
-        # 1. Constant Basis
-        b[0] += P[0]
-        
-        # 2. Variable Bases
-        for k in range(1, n_comp_kernel):
+        # 1. Variable Bases (All 0..M-1)
+        for k in range(n_comp_kernel):
             for p in range(n_spatial):
-                idx = 1 + (k - 1) * n_spatial + p
+                idx = k * n_spatial + p
                 b[idx] += wxy[p] * P[k]
                 
-        # 3. Background
-        bg_start_idx = 1 + (n_comp_kernel - 1) * n_spatial
+        # 2. Background
+        bg_start_idx = n_comp_kernel * n_spatial
         for ib in range(n_bg):
             idx = bg_start_idx + ib
             b[idx] += P[n_comp_kernel + ib]
             
     return b
 
-def fit_kernel(stamps, template, image, config, kernel_vecs):
+def fit_kernel(stamps, template, image, config, kernel_vecs, oversample=1):
     """
     Main Fitting Driver.
     """
     # 0. Initial Local Fit
-    valid_stamps = fit_stamps_locally(stamps, template, image, config, kernel_vecs)
+    valid_stamps = fit_stamps_locally(stamps, template, image, config, kernel_vecs, oversample=oversample)
     
     # 1. Prepare Data for Global Fit
     n_comp_ker = len(kernel_vecs)
@@ -388,14 +394,14 @@ def fit_kernel(stamps, template, image, config, kernel_vecs):
     n_spatial = (ker_order + 1) * (ker_order + 2) // 2
     n_bg = (bg_order + 1) * (bg_order + 2) // 2
     
-    n_params = 1 + (n_comp_ker - 1) * n_spatial + n_bg
+    n_params = n_comp_ker * n_spatial + n_bg
     
     # Global Spatial Polynomials pre-calc?
     # No, we compute local weights for each stamp center
     # "fillStamp" / "check_stamps" does this.
     
     ny, nx = template.shape
-    r_pix_x_2 = 0.5 * nx
+    r_pix_x_2 = 0.5 * nx # Should use state rPix? Yes, matches make_kernel
     r_pix_y_2 = 0.5 * ny
     
     # Pre-calculate spatial weights for all stamps
@@ -412,16 +418,20 @@ def fit_kernel(stamps, template, image, config, kernel_vecs):
         s.weights = np.array(weights)
         
     solution = None
+    final_active_stamps = []
     
     # Iteration Loop
     for iteration in range(10): # Max iter
         
         active_stamps = [s for s in valid_stamps if not s.ignore]
+        final_active_stamps = active_stamps
         n_active = len(active_stamps)
         
         if n_active == 0:
             print("No stamps left!")
             break
+            
+        print(f"DEBUG: Iteration {iteration} - Active Stamps: {n_active}")
             
         # Pack Data for Numba
         s_vectors = np.stack([s.vectors for s in active_stamps]) # (n_stamps, n_vec, n_pix)
@@ -434,36 +444,73 @@ def fit_kernel(stamps, template, image, config, kernel_vecs):
         
         # Solve
         try:
-            x = np.linalg.solve(A, b)
-            solution = x
+            # Solve Ax = b
+            
+            # Precondition A to improve numerical stability (Jacobi Preconditioning)
+            # Scale columns and rows by 1/sqrt(diag) so diagonal becomes 1.
+            diag_A = np.diag(A).copy()
+            # Avoid zero division
+            threshold = 1e-20
+            diag_A[diag_A <= threshold] = 1.0 
+            scale = 1.0 / np.sqrt(diag_A)
+            
+            # A_scaled = D^-1 * A * D^-1
+            # Broadcasting: (N, N) * (N, 1) * (1, N)
+            A_scaled = A * scale[:, None] * scale[None, :]
+            b_scaled = b * scale
+            
+            if iteration == 0:
+                 print(f"DEBUG: Pre-scaling A_00={A[0,0]:.2e}, b_0={b[0]:.2e}")
+            
+            # Use lstsq with machine precision threshold
+            x_scaled, residuals, rank, s = np.linalg.lstsq(A_scaled, b_scaled, rcond=None)
+            
+            if iteration == 0:
+                 print(f"DEBUG: Scaled A cond={s[0]/s[-1]:.2e}, rank={rank}, max_sv={s[0]:.2e}, min_sv={s[-1]:.2e}")
+            
+            # Recover solution: x = D^-1 * x_scaled
+            solution = x_scaled * scale
+            
+            print(f"DEBUG: Iter {iteration} Solution[:10]: {solution[:10]}")
+            print(f"DEBUG: Iter {iteration} b[:10]: {b[:10]}")
+            print(f"DEBUG: Iter {iteration} Solution[430:440]: {solution[430:440]}")
+            print(f"DEBUG: Iter {iteration} b[430:440]: {b[430:440]}")
+
         except np.linalg.LinAlgError:
             print("Singular matrix")
             break
             
+        # Sigma Clipping (Post-Fit)
+        # Calculate chi2 per stamp
+        # This requires re-calculating residuals per stamp using the NEW solution
+        
+        # We need model per stamp
+        # kernel_sol has shape (n_params).
+        # We need to map it back to basis coeffs per stamp.
+        # But global fit solves for SPATIAL coefficients.
+        # Stamp K_n = Sum_k (a_nk * x^deg * y^deg).
+        
         # Check Residuals & Sigma Clip (check_again)
         # We need to construct the MODEL for each stamp using the solution `x`.
-        # Model = Sum(Coeff_k_glob * Vector_k)
         
         residuals = []
         sigmas = []
         
         for idx, s in enumerate(active_stamps):
             # Calculate Local Coefficients `c` from Global `x`
-            # Coeff for Basis 0: x[0]
             c = np.zeros(n_comp_ker + n_bg)
-            c[0] = x[0]
             
-            # Coeff for Basis k > 0: Sum(x[idx] * w[p])
-            for k in range(1, n_comp_ker):
+            # Coeff for Basis k: Sum(x[idx] * w[p])
+            for k in range(n_comp_ker):
                 val = 0.0
                 for p in range(n_spatial):
-                    idx_x = 1 + (k - 1) * n_spatial + p
-                    val += x[idx_x] * s.weights[p]
+                    idx_x = k * n_spatial + p
+                    val += solution[idx_x] * s.weights[p]
                 c[k] = val
                 
             # Coeff for Background
-            bg_start = 1 + (n_comp_ker - 1) * n_spatial
-            c[n_comp_ker:] = x[bg_start : bg_start + n_bg]
+            bg_start = n_comp_ker * n_spatial
+            c[n_comp_ker:] = solution[bg_start : bg_start + n_bg]
             
             # Model = c @ vectors
             model = c @ s.vectors
@@ -475,19 +522,18 @@ def fit_kernel(stamps, template, image, config, kernel_vecs):
             sigmas.append(sigma)
             s.chi2 = sigma
             
-        # Global Sigma Clip based on Residual Sigma
-        # "check_stamps" uses kernel sums.
-        # "check_again" uses residuals.
-        
         sigmas = np.array(sigmas)
         mean_sig = np.mean(sigmas)
         std_sig = np.std(sigmas)
-        
+
         if std_sig == 0: break
         
-        # Reject
-        threshold = 3.0 # config? kerSigReject
-        bad_indices = np.where(np.abs(sigmas - mean_sig) > threshold * std_sig)[0]
+        # Reject (One-sided rejection per alard.c check_again)
+        # "keep good stamps kerSigReject on the low side" -> Reject high sigma outliers
+        threshold = ker_sig_reject 
+        
+        # C check: (chisq - mean) > threshold * sigma
+        bad_indices = np.where((sigmas - mean_sig) > threshold * std_sig)[0]
         
         if len(bad_indices) == 0:
             break
@@ -503,5 +549,29 @@ def fit_kernel(stamps, template, image, config, kernel_vecs):
         if not rejection_happened:
             break
             
-    return solution
+    # Populate Global Models for Visualization
+    if solution is not None:
+        for s in final_active_stamps:
+            # Calculate Local Coefficients `c` from Global `x`
+            c = np.zeros(n_comp_ker + n_bg)
+            for k in range(n_comp_ker):
+                val = 0.0
+                for p in range(n_spatial):
+                    idx_x = k * n_spatial + p
+                    val += solution[idx_x] * s.weights[p]
+                c[k] = val
+            
+            bg_start = n_comp_ker * n_spatial
+            c[n_comp_ker:] = solution[bg_start : bg_start + n_bg]
+            
+            # Model = c @ vectors
+            model = c @ s.vectors
+            if s.image_cutout is not None:
+                s.convolved_model_global = model.reshape(s.image_cutout.shape)
+            else:
+                # Fallback if image_cutout missing
+                dim = int(np.sqrt(model.shape[0]))
+                s.convolved_model_global = model.reshape((dim, dim))
+            
+    return solution, final_active_stamps
 
