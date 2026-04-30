@@ -461,7 +461,7 @@ class Hotpants:
                 print("Rescaling noise for OK pixels...")
             final_noise = self.ext.rescale_noise_ok(self._c_state, diff_image, final_noise, output_mask)
 
-        self.results.update({"convolved_image": convolved_image, "output_mask": output_mask, "diff_image": diff_image, "noise_image": final_noise})
+        self.results.update({"convolved_image": convolved_image, "background": bkg, "output_mask": output_mask, "diff_image": diff_image, "noise_image": final_noise})
 
         self._populate_global_convolved_models()
 
@@ -489,17 +489,18 @@ class Hotpants:
         if self.config.verbose >= 1:
             print("Applying final masks to outputs and calculating statistics...")
 
-        final_diff, final_conv, final_noise, output_mask = (self.results["diff_image"].copy(), self.results["convolved_image"].copy(), self.results["noise_image"].copy(), self.results["output_mask"].copy())
-        bad_pixels = output_mask != 0
-        final_diff[bad_pixels] = self.config.fillval
-        final_conv[bad_pixels] = self.config.fillval
-        final_noise[bad_pixels] = self.config.fillval_noise
+        final_diff, final_conv, final_bkg, final_noise, output_mask = (self.results["diff_image"].copy(), self.results["convolved_image"].copy(), self.results["background"].copy(), self.results["noise_image"].copy(), self.results["output_mask"].copy())
+        # bad_pixels = output_mask != 0
+        # final_diff[bad_pixels] = self.config.fillval
+        # final_conv[bad_pixels] = self.config.fillval
+        # final_noise[bad_pixels] = self.config.fillval_noise
 
         self.results["stats"] = self.ext.calculate_final_stats(self._c_state, final_diff, final_noise, output_mask)
 
         return {
             "diff_image": final_diff,
             "convolved_image": final_conv,
+            "background": final_bkg,
             "noise_image": final_noise,
             "output_mask": output_mask,
             "stats": self.results["stats"],
