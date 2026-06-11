@@ -255,11 +255,11 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
         catalog_data = (float *)PyArray_DATA((PyArrayObject *)catalog_arr_obj);
         npy_intp *dims = PyArray_DIMS((PyArrayObject *)catalog_arr_obj);
         num_catalog_entries = dims[0];
-        printf("Using catalog with %d entries.\n", num_catalog_entries);
+        if (state->verbose > 0) printf("Using catalog with %d entries.\n", num_catalog_entries);
     }
     else
     {
-        printf("No catalog provided, performing automated grid search.\n");
+        if (state->verbose > 0) printf("No catalog provided, performing automated grid search.\n");
     }
 
     for (int l = 0; l < state->nStampY; l++)
@@ -329,7 +329,7 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
             }
         }
     }
-    printf("Found %d template stamps and %d image stamps.\n", ntS, niS);
+    if (state->verbose > 0) printf("Found %d template stamps and %d image stamps.\n", ntS, niS);
 
     // New logic to return flat lists of substamp coordinates
     PyObject *t_substamps_list = PyList_New(0);
