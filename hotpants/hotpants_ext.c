@@ -44,7 +44,7 @@ typedef struct
 } HotpantsStateObject;
 
 static PyObject *hotpants_state_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
-static PyObject *hotpants_state_init_from_config(PyObject *self, PyObject *args);
+static int hotpants_state_init_from_config(PyObject *self, PyObject *args);
 static void free_hotpants_state(HotpantsStateObject *self);
 static int parse_config_dict(PyObject *config_dict, hotpants_config_t *config);
 static PyObject *py_visualize_kernel(PyObject *self, PyObject *args);
@@ -100,6 +100,12 @@ static PyObject *py_make_input_mask(PyObject *self, PyObject *args)
     // First, incorporate external masks if they exist, replicating main.c behavior
     if (t_mask_obj && t_mask_obj != Py_None)
     {
+        if (!PyArray_Check(t_mask_obj))
+        {
+            free(mData);
+            PyErr_SetString(PyExc_TypeError, "t_mask must be a NumPy array");
+            return NULL;
+        }
         int *t_mask_data = (int *)PyArray_DATA((PyArrayObject *)t_mask_obj);
         for (int i = 0; i < state->nx * state->ny; ++i)
         {
@@ -111,6 +117,12 @@ static PyObject *py_make_input_mask(PyObject *self, PyObject *args)
     }
     if (i_mask_obj && i_mask_obj != Py_None)
     {
+        if (!PyArray_Check(i_mask_obj))
+        {
+            free(mData);
+            PyErr_SetString(PyExc_TypeError, "i_mask must be a NumPy array");
+            return NULL;
+        }
         int *i_mask_data = (int *)PyArray_DATA((PyArrayObject *)i_mask_obj);
         for (int i = 0; i < state->nx * state->ny; ++i)
         {
@@ -578,7 +590,12 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
 
         PyDict_SetItemString(result_dict, "fom", PyFloat_FromDouble(all_stamps[group_id].diff));
         PyDict_SetItemString(result_dict, "chi2", PyFloat_FromDouble(all_stamps[group_id].chi2));
-        PyDict_SetItemString(result_dict, "survived_check", (all_stamps[group_id].diff < state->kerSigReject) ? Py_True : Py_False);
+        {
+            PyObject *survived = (all_stamps[group_id].diff < state->kerSigReject) ? Py_True : Py_False;
+            Py_INCREF(survived);
+            PyDict_SetItemString(result_dict, "survived_check", survived);
+            Py_DECREF(survived);
+        }
     }
 
     freeStampMem(state, all_stamps, n_stamps);
@@ -916,6 +933,65 @@ static PyObject *py_calculate_final_stats(PyObject *self, PyObject *args)
 }
 
 // Helper function definitions
+static int config_get_required_float(PyObject *config_dict, const char *key, float *out)
+{
+    PyObject *obj = PyDict_GetItemString(config_dict, key);
+    if (obj == NULL)
+    {
+        PyErr_Format(PyExc_KeyError, "Missing config key: %s", key);
+        return -1;
+    }
+    if (obj == Py_None)
+    {
+        PyErr_Format(PyExc_ValueError, "Config key %s cannot be None", key);
+        return -1;
+    }
+    *out = (float)PyFloat_AsDouble(obj);
+    if (PyErr_Occurred())
+        return -1;
+    return 0;
+}
+
+static int config_get_required_long(PyObject *config_dict, const char *key, int *out)
+{
+    PyObject *obj = PyDict_GetItemString(config_dict, key);
+    if (obj == NULL)
+    {
+        PyErr_Format(PyExc_KeyError, "Missing config key: %s", key);
+        return -1;
+    }
+    if (obj == Py_None)
+    {
+        PyErr_Format(PyExc_ValueError, "Config key %s cannot be None", key);
+        return -1;
+    }
+    *out = (int)PyLong_AsLong(obj);
+    if (PyErr_Occurred())
+        return -1;
+    return 0;
+}
+
+static int config_get_required_char(PyObject *config_dict, const char *key, char *out)
+{
+    PyObject *obj = PyDict_GetItemString(config_dict, key);
+    if (obj == NULL)
+    {
+        PyErr_Format(PyExc_KeyError, "Missing config key: %s", key);
+        return -1;
+    }
+    if (!PyUnicode_Check(obj))
+    {
+        PyErr_Format(PyExc_TypeError, "Config key %s must be a string", key);
+        return -1;
+    }
+    const char *str = PyUnicode_AsUTF8(obj);
+    if (str == NULL)
+        return -1;
+    out[0] = str[0];
+    out[1] = '\0';
+    return 0;
+}
+
 static int parse_config_dict(PyObject *config_dict, hotpants_config_t *config)
 {
     if (!PyDict_Check(config_dict))
@@ -923,70 +999,163 @@ static int parse_config_dict(PyObject *config_dict, hotpants_config_t *config)
         PyErr_SetString(PyExc_TypeError, "Configuration must be a dictionary");
         return -1;
     }
-    config->tuthresh = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "tuthresh"));
+    memset(config, 0, sizeof(*config));
+    config->deg_fixe = NULL;
+    config->sigma_gauss = NULL;
+
+    if (config_get_required_float(config_dict, "tuthresh", &config->tuthresh) < 0)
+        return -1;
     PyObject *tuktresh_obj = PyDict_GetItemString(config_dict, "tuktresh");
-    config->tuktresh = (tuktresh_obj == Py_None) ? config->tuthresh : PyFloat_AsDouble(tuktresh_obj);
-    config->tlthresh = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "tlthresh"));
-    config->tgain = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "tgain"));
-    config->trdnoise = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "trdnoise"));
-    config->tpedestal = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "tpedestal"));
-    config->iuthresh = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "iuthresh"));
+    if (tuktresh_obj == NULL)
+    {
+        PyErr_SetString(PyExc_KeyError, "Missing config key: tuktresh");
+        return -1;
+    }
+    config->tuktresh = (tuktresh_obj == Py_None) ? config->tuthresh : (float)PyFloat_AsDouble(tuktresh_obj);
+    if (PyErr_Occurred())
+        return -1;
+    if (config_get_required_float(config_dict, "tlthresh", &config->tlthresh) < 0)
+        return -1;
+    if (config_get_required_float(config_dict, "tgain", &config->tgain) < 0)
+        return -1;
+    if (config_get_required_float(config_dict, "trdnoise", &config->trdnoise) < 0)
+        return -1;
+    if (config_get_required_float(config_dict, "tpedestal", &config->tpedestal) < 0)
+        return -1;
+    if (config_get_required_float(config_dict, "iuthresh", &config->iuthresh) < 0)
+        return -1;
     PyObject *iuktresh_obj = PyDict_GetItemString(config_dict, "iuktresh");
-    config->iuktresh = (iuktresh_obj == Py_None) ? config->iuthresh : PyFloat_AsDouble(iuktresh_obj);
-    config->ilthresh = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "ilthresh"));
-    config->igain = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "igain"));
-    config->irdnoise = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "irdnoise"));
-    config->ipedestal = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "ipedestal"));
-    config->rkernel = PyLong_AsLong(PyDict_GetItemString(config_dict, "rkernel"));
-    config->ko = PyLong_AsLong(PyDict_GetItemString(config_dict, "ko"));
-    config->bgo = PyLong_AsLong(PyDict_GetItemString(config_dict, "bgo"));
-    config->fitthresh = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "fitthresh"));
-    config->nss = PyLong_AsLong(PyDict_GetItemString(config_dict, "nss"));
-    config->rss = PyLong_AsLong(PyDict_GetItemString(config_dict, "rss"));
-    config->ks = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "ks"));
-    config->kfm = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "kfm"));
-    config->verbose = PyLong_AsLong(PyDict_GetItemString(config_dict, "verbose"));
-    const char *force_conv_str = PyUnicode_AsUTF8(PyDict_GetItemString(config_dict, "force_convolve"));
-    strncpy(config->force_convolve, force_conv_str, 1);
-    config->force_convolve[1] = '\0';
-    const char *normalize_str = PyUnicode_AsUTF8(PyDict_GetItemString(config_dict, "normalize"));
-    strncpy(config->normalize, normalize_str, 1);
-    config->normalize[1] = '\0';
-    const char *fom_str = PyUnicode_AsUTF8(PyDict_GetItemString(config_dict, "fom"));
-    strncpy(config->fom, fom_str, 1);
-    config->fom[1] = '\0';
-    config->fillval = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "fillval"));
-    config->fillval_noise = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "fillval_noise"));
-    config->rescale_ok = PyLong_AsLong(PyDict_GetItemString(config_dict, "rescale_ok"));
-    config->conv_var = PyLong_AsLong(PyDict_GetItemString(config_dict, "conv_var"));
-    config->use_pca = PyLong_AsLong(PyDict_GetItemString(config_dict, "use_pca"));
-    config->nregx = PyLong_AsLong(PyDict_GetItemString(config_dict, "nregx"));
-    config->nregy = PyLong_AsLong(PyDict_GetItemString(config_dict, "nregy"));
-    config->nstampx = PyLong_AsLong(PyDict_GetItemString(config_dict, "nstampx"));
-    config->nstampy = PyLong_AsLong(PyDict_GetItemString(config_dict, "nstampy"));
-    config->ngauss = PyLong_AsLong(PyDict_GetItemString(config_dict, "ngauss"));
+    if (iuktresh_obj == NULL)
+    {
+        PyErr_SetString(PyExc_KeyError, "Missing config key: iuktresh");
+        return -1;
+    }
+    config->iuktresh = (iuktresh_obj == Py_None) ? config->iuthresh : (float)PyFloat_AsDouble(iuktresh_obj);
+    if (PyErr_Occurred())
+        return -1;
+    if (config_get_required_float(config_dict, "ilthresh", &config->ilthresh) < 0)
+        return -1;
+    if (config_get_required_float(config_dict, "igain", &config->igain) < 0)
+        return -1;
+    if (config_get_required_float(config_dict, "irdnoise", &config->irdnoise) < 0)
+        return -1;
+    if (config_get_required_float(config_dict, "ipedestal", &config->ipedestal) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "rkernel", &config->rkernel) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "ko", &config->ko) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "bgo", &config->bgo) < 0)
+        return -1;
+    if (config_get_required_float(config_dict, "fitthresh", &config->fitthresh) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "nss", &config->nss) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "rss", &config->rss) < 0)
+        return -1;
+    if (config_get_required_float(config_dict, "ks", &config->ks) < 0)
+        return -1;
+    if (config_get_required_float(config_dict, "kfm", &config->kfm) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "verbose", &config->verbose) < 0)
+        return -1;
+    if (config_get_required_char(config_dict, "force_convolve", config->force_convolve) < 0)
+        return -1;
+    if (config_get_required_char(config_dict, "normalize", config->normalize) < 0)
+        return -1;
+    if (config_get_required_char(config_dict, "fom", config->fom) < 0)
+        return -1;
+    if (config_get_required_float(config_dict, "fillval", &config->fillval) < 0)
+        return -1;
+    if (config_get_required_float(config_dict, "fillval_noise", &config->fillval_noise) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "rescale_ok", &config->rescale_ok) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "conv_var", &config->conv_var) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "use_pca", &config->use_pca) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "nregx", &config->nregx) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "nregy", &config->nregy) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "nstampx", &config->nstampx) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "nstampy", &config->nstampy) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "ngauss", &config->ngauss) < 0)
+        return -1;
     PyObject *deg_list = PyDict_GetItemString(config_dict, "deg_fixe");
-    if (deg_list)
-    {
-        config->deg_fixe = (int *)malloc(config->ngauss * sizeof(int));
-        for (int i = 0; i < config->ngauss; ++i)
-            config->deg_fixe[i] = PyLong_AsLong(PyList_GetItem(deg_list, i));
-    }
     PyObject *sig_list = PyDict_GetItemString(config_dict, "sigma_gauss");
-    if (sig_list)
+    if (config->ngauss > 0)
     {
+        if (!deg_list || !PyList_Check(deg_list))
+        {
+            PyErr_SetString(PyExc_ValueError, "deg_fixe must be a list when ngauss > 0");
+            return -1;
+        }
+        if (!sig_list || !PyList_Check(sig_list))
+        {
+            PyErr_SetString(PyExc_ValueError, "sigma_gauss must be a list when ngauss > 0");
+            return -1;
+        }
+        if (PyList_Size(deg_list) < config->ngauss || PyList_Size(sig_list) < config->ngauss)
+        {
+            PyErr_SetString(PyExc_ValueError, "deg_fixe and sigma_gauss must have length >= ngauss");
+            return -1;
+        }
+        config->deg_fixe = (int *)malloc(config->ngauss * sizeof(int));
+        if (config->deg_fixe == NULL)
+        {
+            PyErr_NoMemory();
+            return -1;
+        }
         config->sigma_gauss = (float *)malloc(config->ngauss * sizeof(float));
+        if (config->sigma_gauss == NULL)
+        {
+            free(config->deg_fixe);
+            config->deg_fixe = NULL;
+            PyErr_NoMemory();
+            return -1;
+        }
         for (int i = 0; i < config->ngauss; ++i)
-            config->sigma_gauss[i] = PyFloat_AsDouble(PyList_GetItem(sig_list, i));
+        {
+            config->deg_fixe[i] = (int)PyLong_AsLong(PyList_GetItem(deg_list, i));
+            if (PyErr_Occurred())
+            {
+                free(config->deg_fixe);
+                free(config->sigma_gauss);
+                config->deg_fixe = NULL;
+                config->sigma_gauss = NULL;
+                return -1;
+            }
+            config->sigma_gauss[i] = (float)PyFloat_AsDouble(PyList_GetItem(sig_list, i));
+            if (PyErr_Occurred())
+            {
+                free(config->deg_fixe);
+                free(config->sigma_gauss);
+                config->deg_fixe = NULL;
+                config->sigma_gauss = NULL;
+                return -1;
+            }
+        }
     }
-    config->fwkernel = PyLong_AsLong(PyDict_GetItemString(config_dict, "fwkernel"));
-    config->fwksstamp = PyLong_AsLong(PyDict_GetItemString(config_dict, "fwksstamp"));
-    config->ncomp_ker = PyLong_AsLong(PyDict_GetItemString(config_dict, "ncomp_ker"));
-    config->ncomp = PyLong_AsLong(PyDict_GetItemString(config_dict, "ncomp"));
-    config->n_bg_vectors = PyLong_AsLong(PyDict_GetItemString(config_dict, "n_bg_vectors"));
-    config->n_comp_total = PyLong_AsLong(PyDict_GetItemString(config_dict, "n_comp_total"));
-    config->stat_sig = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "stat_sig"));
-    config->kf_spread_mask1 = PyFloat_AsDouble(PyDict_GetItemString(config_dict, "kf_spread_mask1"));
+    if (config_get_required_long(config_dict, "fwkernel", &config->fwkernel) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "fwksstamp", &config->fwksstamp) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "ncomp_ker", &config->ncomp_ker) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "ncomp", &config->ncomp) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "n_bg_vectors", &config->n_bg_vectors) < 0)
+        return -1;
+    if (config_get_required_long(config_dict, "n_comp_total", &config->n_comp_total) < 0)
+        return -1;
+    if (config_get_required_float(config_dict, "stat_sig", &config->stat_sig) < 0)
+        return -1;
+    if (config_get_required_float(config_dict, "kf_spread_mask1", &config->kf_spread_mask1) < 0)
+        return -1;
     return 0;
 }
 
@@ -994,40 +1163,43 @@ static PyObject *hotpants_state_new(PyTypeObject *type, PyObject *args, PyObject
 {
     HotpantsStateObject *self;
     self = (HotpantsStateObject *)type->tp_alloc(type, 0);
-    if (self != NULL)
+    if (self == NULL)
     {
-        self->state = (hotpants_state_t *)malloc(sizeof(hotpants_state_t));
-        if (self->state == NULL)
-        {
-            Py_DECREF(self);
-            PyErr_SetString(PyExc_MemoryError, "Failed to allocate hotpants_state_t");
-            return NULL;
-        }
-        memset(self->state, 0, sizeof(hotpants_state_t));
+        if (!PyErr_Occurred())
+            PyErr_NoMemory();
+        return NULL;
     }
+    self->state = (hotpants_state_t *)malloc(sizeof(hotpants_state_t));
+    if (self->state == NULL)
+    {
+        Py_DECREF(self);
+        PyErr_SetString(PyExc_MemoryError, "Failed to allocate hotpants_state_t");
+        return NULL;
+    }
+    memset(self->state, 0, sizeof(hotpants_state_t));
     return (PyObject *)self;
 }
 
-static PyObject *hotpants_state_init_from_config(PyObject *self, PyObject *args)
+static int hotpants_state_init_from_config(PyObject *self, PyObject *args)
 {
     PyObject *config_dict_obj;
     int nx, ny;
     if (!PyArg_ParseTuple(args, "iiO!", &nx, &ny, &PyDict_Type, &config_dict_obj))
     {
-        return NULL;
+        return -1;
     }
 
     HotpantsStateObject *state_obj = (HotpantsStateObject *)self;
     if (!state_obj || !state_obj->state)
     {
         PyErr_SetString(PyExc_RuntimeError, "Invalid state object.");
-        return NULL;
+        return -1;
     }
 
     hotpants_config_t config;
     if (parse_config_dict(config_dict_obj, &config) < 0)
     {
-        return NULL;
+        return -1;
     }
 
     hotpants_state_t *state = state_obj->state;
@@ -1073,10 +1245,38 @@ static PyObject *hotpants_state_init_from_config(PyObject *self, PyObject *args)
     state->statSig = config.stat_sig;
     state->kfSpreadMask1 = config.kf_spread_mask1;
     state->ngauss = config.ngauss;
-    state->deg_fixe = (int *)malloc(state->ngauss * sizeof(int));
-    memcpy(state->deg_fixe, config.deg_fixe, state->ngauss * sizeof(int));
-    state->sigma_gauss = (float *)malloc(state->ngauss * sizeof(float));
-    memcpy(state->sigma_gauss, config.sigma_gauss, state->ngauss * sizeof(float));
+    if (state->ngauss > 0)
+    {
+        if (!config.deg_fixe || !config.sigma_gauss)
+        {
+            PyErr_SetString(PyExc_ValueError, "deg_fixe and sigma_gauss required when ngauss > 0");
+            free(config.deg_fixe);
+            free(config.sigma_gauss);
+            return -1;
+        }
+        state->deg_fixe = (int *)malloc(state->ngauss * sizeof(int));
+        if (state->deg_fixe == NULL)
+        {
+            free(config.deg_fixe);
+            free(config.sigma_gauss);
+            PyErr_NoMemory();
+            return -1;
+        }
+        memcpy(state->deg_fixe, config.deg_fixe, state->ngauss * sizeof(int));
+        state->sigma_gauss = (float *)malloc(state->ngauss * sizeof(float));
+        if (state->sigma_gauss == NULL)
+        {
+            free(state->deg_fixe);
+            state->deg_fixe = NULL;
+            free(config.deg_fixe);
+            free(config.sigma_gauss);
+            PyErr_NoMemory();
+            return -1;
+        }
+        memcpy(state->sigma_gauss, config.sigma_gauss, state->ngauss * sizeof(float));
+    }
+    free(config.deg_fixe);
+    free(config.sigma_gauss);
     state->fwKernel = config.fwkernel;
 
     state->fwStamp = imin(state->nx / state->nRegX / state->nStampX,
@@ -1122,7 +1322,7 @@ static PyObject *hotpants_state_init_from_config(PyObject *self, PyObject *args)
         }
     }
 
-    Py_RETURN_NONE;
+    return 0;
 }
 
 static void free_hotpants_state(HotpantsStateObject *self)
