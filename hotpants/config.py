@@ -99,7 +99,7 @@ class HotpantsConfig:
         # [-tuk tucthresh]  : upper valid data count for kernel, template (tuthresh)
         self.tuktresh = kwargs.get("tuktresh", None)
         # [-tl tlthresh]    : lower valid data count, template (min value in template)
-        self.tlthresh = kwargs.get("tlthresh", 0.0)
+        self.tlthresh = kwargs.get("tlthresh", None)
         # [-tg tgain]       : gain in template (1)
         self.tgain = kwargs.get("tgain", 1.0)
         # [-tr trdnoise]    : e- readnoise in template (0)
