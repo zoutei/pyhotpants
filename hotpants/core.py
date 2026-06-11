@@ -131,8 +131,34 @@ class Hotpants:
         self.ny, self.nx = self.template_data.shape
 
         self.config = config if config is not None else HotpantsConfig(nx=self.nx, ny=self.ny)
-        self._t_error_input = np.ascontiguousarray(t_error, dtype=np.float32) if t_error is not None else None
-        self._i_error_input = np.ascontiguousarray(i_error, dtype=np.float32) if i_error is not None else None
+
+        if t_error is not None:
+            t_error_arr = np.asarray(t_error)
+            self._validate_aux_array(t_error_arr, "t_error")
+            self._t_error_input = np.ascontiguousarray(t_error_arr, dtype=np.float32)
+        else:
+            self._t_error_input = None
+
+        if i_error is not None:
+            i_error_arr = np.asarray(i_error)
+            self._validate_aux_array(i_error_arr, "i_error")
+            self._i_error_input = np.ascontiguousarray(i_error_arr, dtype=np.float32)
+        else:
+            self._i_error_input = None
+
+        if t_mask is not None:
+            t_mask_arr = np.asarray(t_mask)
+            self._validate_aux_array(t_mask_arr, "t_mask")
+            self._t_mask_input = np.ascontiguousarray(t_mask_arr, dtype=np.int32)
+        else:
+            self._t_mask_input = None
+
+        if i_mask is not None:
+            i_mask_arr = np.asarray(i_mask)
+            self._validate_aux_array(i_mask_arr, "i_mask")
+            self._i_mask_input = np.ascontiguousarray(i_mask_arr, dtype=np.int32)
+        else:
+            self._i_mask_input = None
 
         if star_catalog is not None:
             if not isinstance(star_catalog, np.ndarray) or star_catalog.ndim != 2 or star_catalog.shape[1] != 2:
@@ -146,19 +172,19 @@ class Hotpants:
         self.template_substamps: List[Substamp] = []
         self.image_substamps: List[Substamp] = []
 
-        # Dynamically set thresholds if not provided
+        # Dynamically set thresholds if not provided (nan-aware for masked JWST/FITS data)
         if self.config.tuthresh is None:
-            self.config.tuthresh = np.max(self.template_data)
+            self.config.tuthresh = np.nanmax(self.template_data)
         if self.config.tuktresh is None:
             self.config.tuktresh = self.config.tuthresh
         if self.config.tlthresh is None:
-            self.config.tlthresh = np.min(self.template_data)
+            self.config.tlthresh = np.nanmin(self.template_data)
         if self.config.iuthresh is None:
-            self.config.iuthresh = np.max(self.image_data)
+            self.config.iuthresh = np.nanmax(self.image_data)
         if self.config.iuktresh is None:
             self.config.iuktresh = self.config.iuthresh
         if self.config.ilthresh is None:
-            self.config.ilthresh = np.min(self.image_data)
+            self.config.ilthresh = np.nanmin(self.image_data)
 
         # Initialize C state object and pre-compute masks and noise images
         self._c_state = self.ext.HotpantsState(self.nx, self.ny, self.config.to_dict())
@@ -166,9 +192,6 @@ class Hotpants:
             print(f"Initialized HOTPANTS state: {self._c_state}")
 
         # 1. Create the initial input mask from the images and C extension.
-        self._t_mask_input = np.ascontiguousarray(t_mask, dtype=np.int32) if t_mask is not None else None
-        self._i_mask_input = np.ascontiguousarray(i_mask, dtype=np.int32) if i_mask is not None else None
-
         input_mask = self.ext.make_input_mask(self._c_state, self.template_data, self.image_data, self._t_mask_input, self._i_mask_input)
         if self.config.verbose >= 1:
             print(f"Input mask created with shape: {input_mask.shape}, dtype: {input_mask.dtype}")
@@ -227,6 +250,13 @@ class Hotpants:
         if a1.shape != a2.shape:
             raise HotpantsError(f"{names} must have the same dimensions")
 
+    def _validate_aux_array(self, arr: np.ndarray, name: str):
+        """Checks if an auxiliary array matches the image shape."""
+        if arr.ndim != 2:
+            raise HotpantsError(f"{name} must be a 2D array")
+        if arr.shape != (self.ny, self.nx):
+            raise HotpantsError(f"{name} must have shape ({self.ny}, {self.nx})")
+
     def find_stamps(self) -> Tuple[List[Substamp], List[Substamp]]:
         """
         Step 1: Finds potential substamp coordinates for kernel fitting.
@@ -252,7 +282,13 @@ class Hotpants:
         if self.config.verbose >= 1:
             print(f"Found {len(self.template_substamps)} potential template substamps and {len(self.image_substamps)} potential image substamps.")
 
-        if not self.template_substamps and not self.image_substamps:
+        if self.config.force_convolve == "t":
+            if not self.template_substamps:
+                raise HotpantsError("No valid template substamps found for kernel fitting.")
+        elif self.config.force_convolve == "i":
+            if not self.image_substamps:
+                raise HotpantsError("No valid image substamps found for kernel fitting.")
+        elif not self.template_substamps and not self.image_substamps:
             raise HotpantsError("No valid substamps found for kernel fitting.")
 
         return self.template_substamps, self.image_substamps
@@ -639,8 +675,9 @@ class Hotpants:
         self.fit_and_select_direction()
         self.iterative_fit_and_clip()
         self.convolve_and_difference()
+        outputs = self.get_final_outputs()
         self.save_outputs()
-        return self.get_final_outputs()
+        return outputs
 
     def visualize_kernel(self, at_coords: Tuple[int, int], size_factor: float = 2.0) -> np.ndarray:
         """
