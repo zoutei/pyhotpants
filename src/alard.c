@@ -540,7 +540,7 @@ double check_stamps(hotpants_state_t *state, stamp_struct *stamps, int nS, float
     
     sigma_clip(state, ks, nks, &kmean, &kstdev, 10);
     
-    fprintf(stderr, "    %.1f sigma clipped mean ksum : %.3f, stdev : %.3f, n : %i\n",
+    if (state->verbose > 0) fprintf(stderr, "    %.1f sigma clipped mean ksum : %.3f, stdev : %.3f, n : %i\n",
             state->kerSigReject, kmean, kstdev, nks);
     
     /* so we need some way to reject bad stamps here in the first test,
@@ -662,7 +662,7 @@ double check_stamps(hotpants_state_t *state, stamp_struct *stamps, int nS, float
         free(ks);
         
         /* average value of figures of merit across stamps */
-        fprintf(stderr, "    <var_merit> = %.3f, <sd_merit> = %.3f, <hist_merit> = %.3f\n", merit1, merit2, merit3);
+        if (state->verbose > 0) fprintf(stderr, "    <var_merit> = %.3f, <sd_merit> = %.3f, <hist_merit> = %.3f\n", merit1, merit2, merit3);
         
         /* return what is asked for if possible, if not use backup */
         if (strncmp(state->figMerit_str, "v", 1)==0) {

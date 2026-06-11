@@ -124,7 +124,7 @@ int main(int argc,char *argv[]) {
             printError(status);
         
         if ( (oNaxes[0] != tNaxes[0]) || (oNaxes[1] != tNaxes[1]) ) {
-            fprintf(stderr, "WARNING : Input template noise array not same size as template, ignoring...\n");
+            if (verbose > 0) fprintf(stderr, "WARNING : Input template noise array not same size as template, ignoring...\n");
             tNoiseIm = NULL;
         }
         
@@ -147,7 +147,7 @@ int main(int argc,char *argv[]) {
             printError(status);
         
         if ( (oNaxes[0] != iNaxes[0]) || (oNaxes[1] != iNaxes[1]) ) {
-            fprintf(stderr, "WARNING : Input image noise array not same size as image, ignoring...\n");
+            if (verbose > 0) fprintf(stderr, "WARNING : Input image noise array not same size as image, ignoring...\n");
             iNoiseIm = NULL;
         }
         if ( fits_close_file(ePtr, &status) )
@@ -160,7 +160,7 @@ int main(int argc,char *argv[]) {
             printError(status);
         
         if ( (oNaxes[0] != iNaxes[0]) || (oNaxes[1] != iNaxes[1]) ) {
-            fprintf(stderr, "WARNING : Input template noise array not same size as image, ignoring...\n");
+            if (verbose > 0) fprintf(stderr, "WARNING : Input template noise array not same size as image, ignoring...\n");
             tNoiseIm = NULL;
         }
         if ( fits_close_file(ePtr, &status) )
@@ -175,7 +175,7 @@ int main(int argc,char *argv[]) {
             printError(status);
         
         if ( (oNaxes[0] != iNaxes[0]) || (oNaxes[1] != iNaxes[1]) ) {
-            fprintf(stderr, "WARNING : Input image mask array not same size as image, ignoring...\n");
+            if (verbose > 0) fprintf(stderr, "WARNING : Input image mask array not same size as image, ignoring...\n");
             iMaskIm = NULL;
         }
         if ( fits_close_file(ePtr, &status) )
@@ -188,7 +188,7 @@ int main(int argc,char *argv[]) {
             printError(status);
         
         if ( (oNaxes[0] != iNaxes[0]) || (oNaxes[1] != iNaxes[1]) ) {
-            fprintf(stderr, "WARNING : Input template mask array not same size as image, ignoring...\n");
+            if (verbose > 0) fprintf(stderr, "WARNING : Input template mask array not same size as image, ignoring...\n");
             tMaskIm = NULL;
         }
         if ( fits_close_file(ePtr, &status) )
@@ -196,11 +196,13 @@ int main(int argc,char *argv[]) {
     }
     
     /* let em know whats going on... */
+    if (verbose > 0) {
     fprintf(stderr, "Doing : %s -\n", image);
     fprintf(stderr, "        %s =\n", template);
     fprintf(stderr, "        %s\n", outim);
     fprintf(stderr, "   Good templ data : %.1f -> %.1f\n", tLThresh, tUThresh);
     fprintf(stderr, "   Good image data : %.1f -> %.1f\n", iLThresh, iUThresh);
+    }
     
     /* ADU pedestal? */
     tUThresh  -= tPedestal;
@@ -368,7 +370,7 @@ int main(int argc,char *argv[]) {
     if (kernelImIn) {
         /* possibly override defaults with info in kernel image */
         getKernelInfo(kernelImIn);
-        fprintf(stderr, "   received kernel info\n");
+        if (verbose > 0) fprintf(stderr, "   received kernel info\n");
     }
     
     /* determine the size of the data structures */
@@ -389,7 +391,7 @@ int main(int argc,char *argv[]) {
         fwStamp     = fwKernel;
         nStampX     = (int)(imin(tNaxes[0], iNaxes[0]) / nRegX / fwStamp);
         nStampY     = (int)(imin(tNaxes[1], iNaxes[1]) / nRegY / fwStamp);
-        fprintf(stderr, "Using maximial number of stamps : %d x %d\n", nStampX, nStampY);
+        if (verbose > 0) fprintf(stderr, "Using maximial number of stamps : %d x %d\n", nStampX, nStampY);
     }
     else {
         fwKSStamp   = hwKSStamp * 2 + 1;     /* substamp size */
@@ -420,7 +422,7 @@ int main(int argc,char *argv[]) {
     nStamps = nStampX * nStampY;
     sBorder = hwKSStamp + hwKernel;
     
-    fprintf(stderr, "Mallocing massive amounts of memory...\n");
+    if (verbose > 0) fprintf(stderr, "Mallocing massive amounts of memory...\n");
     
     /* malloc data structures */
     if ( !(temp    = (float *)calloc((fwKSStamp+fwKernel)*fwKSStamp, sizeof(float))) ||
@@ -650,12 +652,14 @@ int main(int argc,char *argv[]) {
         lpixelOutX = fpixelOutX + (rPixX - xBufHi - xBufLo - 1);
         lpixelOutY = fpixelOutY + (rPixY - yBufHi - yBufLo - 1);
         
+        if (verbose > 0) {
         fprintf(stderr, "Region %d pixels            : %ld:%ld,%ld:%ld\n"
                 , i, pixMin[0], pixMax[0], pixMin[1], pixMax[1]);
         fprintf(stderr, " Vector Indices (buffered) : %d:%d,%d:%d\n"
                 , rXBMin, rXBMax, rYBMin, rYBMax);
         fprintf(stderr, " Vector Indices (good data): %d:%d,%d:%d\n"
                 , rXMin, rXMax, rYMin, rYMax);
+        }
         
         /* malloc standard input and output arrays */
         tRData = (float *)calloc(rPixX*rPixY, sizeof(float));
@@ -830,7 +834,7 @@ int main(int argc,char *argv[]) {
                 for (l = 0; l < nStampY; l++) {
                     for (k = 0; k < nStampX; k++) {
                         
-                        fprintf(stderr, "Build stamp  : t %4d i %4d (grid coord %2d %2d)\n", ntS, niS, k, l);
+                        if (verbose > 0) fprintf(stderr, "Build stamp  : t %4d i %4d (grid coord %2d %2d)\n", ntS, niS, k, l);
                         /* coordinates in the image, not the region */
                         
                         /* NOTE : we keep float-valued 'rPixX / nStampX' in
@@ -903,21 +907,21 @@ int main(int argc,char *argv[]) {
                 tSFrac = ntS / (float) nStamps;
                 
                 if (strncmp(forceConvolve, "i", 1)==0) {
-                    fprintf(stderr, "%d stamps built (%.2f%s)\n\n", niS, iSFrac, "%");
+                    if (verbose > 0) fprintf(stderr, "%d stamps built (%.2f%s)\n\n", niS, iSFrac, "%");
                     if (iSFrac < minFracGoodStamps)
                         flag = 1;
                 }
                 else if (strncmp(forceConvolve, "t", 1)==0) {
-                    fprintf(stderr, "%d stamps built (%.2f%s)\n\n", ntS, tSFrac, "%");
+                    if (verbose > 0) fprintf(stderr, "%d stamps built (%.2f%s)\n\n", ntS, tSFrac, "%");
                     if (tSFrac < minFracGoodStamps)
                         flag = 1;
                 }
                 else if ((iSFrac < minFracGoodStamps) || (tSFrac < minFracGoodStamps)) {
-                    fprintf(stderr, "%d and %d stamps built (%.2f%s, %.2f%s)\n\n", ntS, niS, tSFrac, "%", iSFrac, "%");
+                    if (verbose > 0) fprintf(stderr, "%d and %d stamps built (%.2f%s, %.2f%s)\n\n", ntS, niS, tSFrac, "%", iSFrac, "%");
                     flag = 1;
                 }
                 else {
-                    fprintf(stderr, "%d and %d stamps built (%.2f%s, %.2f%s)\n\n", ntS, niS, tSFrac, "%", iSFrac, "%");
+                    if (verbose > 0) fprintf(stderr, "%d and %d stamps built (%.2f%s, %.2f%s)\n\n", ntS, niS, tSFrac, "%", iSFrac, "%");
                     break;
                 }
                 
@@ -943,7 +947,7 @@ int main(int argc,char *argv[]) {
                     /* start over... */
                     kerFitThresh *= scaleFitThresh;
                     
-                    fprintf(stderr, "Too few stamps were fit, scaling down fitting threshold to %.2f\n", kerFitThresh);
+                    if (verbose > 0) fprintf(stderr, "Too few stamps were fit, scaling down fitting threshold to %.2f\n", kerFitThresh);
                     
                     if (ctStamps) {
                         freeStampMem(ctStamps, nStamps);
@@ -1014,7 +1018,7 @@ int main(int argc,char *argv[]) {
             /* initialize kernel weight mask: kernel_vec */
             getKernelVec(); 
             
-            fprintf(stderr, "Filling Template sub-stamps\n");
+            if (verbose > 0) fprintf(stderr, "Filling Template sub-stamps\n");
             /* fit the kernel going each way unless told otherwise */
             if (!(strncmp(forceConvolve, "i", 1)==0)) {
                 for (k = 0; k < ntS; k++) {
@@ -1022,15 +1026,19 @@ int main(int argc,char *argv[]) {
                     fillStamp(&ctStamps[k], tRData, iRData);
                 }
                 if ((strncmp(forceConvolve, "b", 1)==0)) {
-                    fprintf(stderr, "\n\nTrying to convolve the TEMPLATE to fit IMAGE\n");
-                    tMerit = check_stamps(ctStamps, ntS, iRData, oRData);
-                    fprintf(stderr, "    Result : merit = %.3f\n", tMerit);
+                    if (verbose > 0) {
+                        fprintf(stderr, "\n\nTrying to convolve the TEMPLATE to fit IMAGE\n");
+                        tMerit = check_stamps(ctStamps, ntS, iRData, oRData);
+                        fprintf(stderr, "    Result : merit = %.3f\n", tMerit);
+                    } else {
+                        tMerit = check_stamps(ctStamps, ntS, iRData, oRData);
+                    }
                 }
                 else 
                     tMerit = iMerit = 0;
             }
             
-            fprintf(stderr, "Filling Image sub-stamps\n");
+            if (verbose > 0) fprintf(stderr, "Filling Image sub-stamps\n");
             if (!(strncmp(forceConvolve, "t", 1)==0)) {
                 
                 for (k = 0; k < niS; k++) {
@@ -1038,9 +1046,13 @@ int main(int argc,char *argv[]) {
                     fillStamp(&ciStamps[k], iRData, tRData);
                 }
                 if ((strncmp(forceConvolve, "b", 1)==0)) {
-                    fprintf(stderr, "\n\nTrying to convolve the IMAGE to fit TEMPLATE \n");
-                    iMerit = check_stamps(ciStamps, niS, tRData, oRData);
-                    fprintf(stderr, "    Result : merit = %.3f\n", iMerit);
+                    if (verbose > 0) {
+                        fprintf(stderr, "\n\nTrying to convolve the IMAGE to fit TEMPLATE \n");
+                        iMerit = check_stamps(ciStamps, niS, tRData, oRData);
+                        fprintf(stderr, "    Result : merit = %.3f\n", iMerit);
+                    } else {
+                        iMerit = check_stamps(ciStamps, niS, tRData, oRData);
+                    }
                 }
                 else
                     iMerit = tMerit = 0;
@@ -1066,7 +1078,7 @@ int main(int argc,char *argv[]) {
         
         /* do it! */
         if (convTmpl) {
-            fprintf(stderr, "\n\n Region %d:%d,%d:%d : Convolving TEMPLATE\n", rXMin, rXMax, rYMin, rYMax);
+            if (verbose > 0) fprintf(stderr, "\n\n Region %d:%d,%d:%d : Convolving TEMPLATE\n", rXMin, rXMax, rYMin, rYMax);
             
             freeStampMem(ciStamps, nStamps);
             /*allocateStamps(ciStamps, nStamps);*/
@@ -1112,7 +1124,7 @@ int main(int argc,char *argv[]) {
             }
             
             /* spatial_convolve effectively spreads the input mtsRData mask into global mRData output mask!  bitwise... */
-            fprintf(stderr, "\n Convolving...\n");
+            if (verbose > 0) fprintf(stderr, "\n Convolving...\n");
             spatial_convolve(tRData, &eRData, rPixX, rPixY, tKerSol, oRData, mtsRData);
             
             /* correct for background */
@@ -1122,12 +1134,12 @@ int main(int argc,char *argv[]) {
             
             
             sumKernel = make_kernel(rXMin, rYMin, tKerSol);
-            fprintf(stderr, " Sum Kernel at %d,%d: %f\n", rXMin, rYMin, sumKernel);
+            if (verbose > 0) fprintf(stderr, " Sum Kernel at %d,%d: %f\n", rXMin, rYMin, sumKernel);
             sumKernel = make_kernel(rXMax, rYMax, tKerSol);
-            fprintf(stderr, " Sum Kernel at %d,%d: %f\n", rXMax, rYMax, sumKernel);
+            if (verbose > 0) fprintf(stderr, " Sum Kernel at %d,%d: %f\n", rXMax, rYMax, sumKernel);
             /* use middle of region to normalize image */
             sumKernel = make_kernel(rPixX/2, rPixY/2, tKerSol);
-            fprintf(stderr, " Using Kernel Sum = %f\n\n", sumKernel);
+            if (verbose > 0) fprintf(stderr, " Using Kernel Sum = %f\n\n", sumKernel);
             
             
             /* eRData now contains partial noise image */
@@ -1188,7 +1200,7 @@ int main(int argc,char *argv[]) {
             */
         }
         else {
-            fprintf(stderr, "\n\n Region %d,%d %d,%d : Convolving IMAGE\n", rXMin, rXMax, rYMin, rYMax);
+            if (verbose > 0) fprintf(stderr, "\n\n Region %d,%d %d,%d : Convolving IMAGE\n", rXMin, rXMax, rYMin, rYMax);
             
             freeStampMem(ctStamps, nStamps);
             /*allocateStamps(ctStamps, nStamps);*/
@@ -1234,7 +1246,7 @@ int main(int argc,char *argv[]) {
             }
             
             /* spatial_convolve effectively spreads the input misRData mask into global mRData output mask!  bitwise... */
-            fprintf(stderr, "\n Convolving...\n");
+            if (verbose > 0) fprintf(stderr, "\n Convolving...\n");
             spatial_convolve(iRData, &eRData, rPixX, rPixY, iKerSol, oRData, misRData);
             
             /* correct for background */
@@ -1243,12 +1255,12 @@ int main(int argc,char *argv[]) {
                     oRData[k+rPixX*l] += get_background(k, l, iKerSol);
             
             sumKernel = make_kernel(rXMin, rYMin, iKerSol);
-            fprintf(stderr, " Sum Kernel at %d,%d: %f\n", rXMin, rYMin, sumKernel);
+            if (verbose > 0) fprintf(stderr, " Sum Kernel at %d,%d: %f\n", rXMin, rYMin, sumKernel);
             sumKernel = make_kernel(rXMax, rYMax, iKerSol);
-            fprintf(stderr, " Sum Kernel at %d,%d: %f\n", rXMax, rYMax, sumKernel);
+            if (verbose > 0) fprintf(stderr, " Sum Kernel at %d,%d: %f\n", rXMax, rYMax, sumKernel);
             /* use middle of region to normalize image */
             sumKernel = make_kernel(rPixX/2, rPixY/2, iKerSol);
-            fprintf(stderr, " Using Kernel Sum = %f\n\n", sumKernel);
+            if (verbose > 0) fprintf(stderr, " Using Kernel Sum = %f\n\n", sumKernel);
             
             
             /* eRData now contains partial noise image */
@@ -1324,7 +1336,7 @@ int main(int argc,char *argv[]) {
                 mRData[k+rPixX*l] |= FLAG_OUTPUT_ISBAD;
         
         
-        fprintf(stderr, " Creating and writing output images...\n");
+        if (verbose > 0) fprintf(stderr, " Creating and writing output images...\n");
         
         /*
           NOTE : this is split up the way it is so that the code is not
@@ -1422,7 +1434,7 @@ int main(int argc,char *argv[]) {
                     }
                     /* save the mean and scatter so that it can be saved in the fits header */
                     sigma_clip(temp2, k, &meansigSubstampsF, &scatterSubstampsF, 10);
-                    fprintf(stderr, "   FINAL Mean sig: %6.3f stdev: %6.3f\n", meansigSubstampsF, scatterSubstampsF);
+                    if (verbose > 0) fprintf(stderr, "   FINAL Mean sig: %6.3f stdev: %6.3f\n", meansigSubstampsF, scatterSubstampsF);
                     free(temp2);
                 }
             }
@@ -1461,7 +1473,7 @@ int main(int argc,char *argv[]) {
                     }
                     /* save the mean and scatter so that it can be saved in the fits header */
                     sigma_clip(temp2, k, &meansigSubstampsF, &scatterSubstampsF, 10);
-                    fprintf(stderr, "    FINAL Mean sig: %6.3f stdev: %6.3f\n", meansigSubstampsF, scatterSubstampsF);
+                    if (verbose > 0) fprintf(stderr, "    FINAL Mean sig: %6.3f stdev: %6.3f\n", meansigSubstampsF, scatterSubstampsF);
                     free(temp2);
                 }
             }
@@ -1469,18 +1481,20 @@ int main(int argc,char *argv[]) {
             
         }
         
-        fprintf(stderr, " Getting diffim stats for GOOD pixels : \n");
+        if (verbose > 0) fprintf(stderr, " Getting diffim stats for GOOD pixels : \n");
         getStampStats3(oRData, 0, 0, rPixX, rPixY,
-                       &sum, &mean, &median,
-                       &mode, &sd, &fwhm, &lfwhm, 0x0, 0xffff, 5);
+                        &sum, &mean, &median,
+                        &mode, &sd, &fwhm, &lfwhm, 0x0, 0xffff, 5);
+        if (verbose > 0) { 
         fprintf(stderr, "   Mean   : %.2f\n", mean);
         fprintf(stderr, "   Median : %.2f\n", median);
         fprintf(stderr, "   Mode   : %.2f\n", mode);
         fprintf(stderr, "   Stdev  : %.2f\n", sd);
+        }
         if (verbose >= 2) fprintf(stderr, "   FWHM   : %.2f\n", fwhm);
         if (verbose >= 2) fprintf(stderr, "   lFWHM  : %.2f\n", lfwhm);
         
-        fprintf(stderr, " Getting noiseim stats for GOOD pixels : \n");
+        if (verbose > 0) fprintf(stderr, " Getting noiseim stats for GOOD pixels : \n");
         if (convTmpl) {
             getStampStats3(tRData, 0, 0, rPixX, rPixY,
                            &nsum, &nmean, &nmedian,
@@ -1495,17 +1509,21 @@ int main(int argc,char *argv[]) {
             getNoiseStats3(oRData, iRData, &x2norm, &nx2norm, 0x0, 0xffff);
         }
         
+        if (verbose > 0) {
         fprintf(stderr, "   Mean   : %.2f\n", nmean);
         fprintf(stderr, "   Median : %.2f\n", nmedian);
         fprintf(stderr, "   Mode   : %.2f\n", nmode);
         fprintf(stderr, "   Stdev  : %.2f\n", nsd);
+        }
         if (verbose >= 2) fprintf(stderr, "   FWHM   : %.2f\n", nfwhm);
         if (verbose >= 2) fprintf(stderr, "   lFWHM  : %.2f\n", nlfwhm);
         
         /* find ratio for GOOD pixels only */
+        if (verbose > 0) {
         if (!(kernelImIn))
             fprintf(stderr, " Emperical / Expected Noise for GOOD pixels = %.2f\n", sd / nmean);
         fprintf(stderr, " X2NORM = %.2f\n\n", x2norm);
+        }
         
         
         if (!(kernelImIn)) {
@@ -1514,18 +1532,20 @@ int main(int argc,char *argv[]) {
         
         /* */
         
-        fprintf(stderr, " Getting diffim stats for OK pixels : \n");
+        if (verbose > 0) fprintf(stderr, " Getting diffim stats for OK pixels : \n");
         getStampStats3(oRData, 0, 0, rPixX, rPixY,
                        &summ, &meanm, &medianm,
                        &modem, &sdm, &fwhmm, &lfwhmm, 0xff, FLAG_OUTPUT_ISBAD, 5);
+        if (verbose > 0) {
         fprintf(stderr, "   Mean   : %.2f\n", meanm);
         fprintf(stderr, "   Median : %.2f\n", medianm);
         fprintf(stderr, "   Mode   : %.2f\n", modem);
         fprintf(stderr, "   Stdev  : %.2f\n", sdm);
+        } 
         if (verbose >= 2) fprintf(stderr, "   FWHM   : %.2f\n", fwhmm);
         if (verbose >= 2) fprintf(stderr, "   lFWHM  : %.2f\n", lfwhmm);
         
-        fprintf(stderr, " Getting noiseim stats for OK pixels : \n");
+        if (verbose > 0) fprintf(stderr, " Getting noiseim stats for OK pixels : \n");
         if (convTmpl) 
             getStampStats3(tRData, 0, 0, rPixX, rPixY,
                            &nsumm, &nmeanm, &nmedianm,
@@ -1535,16 +1555,20 @@ int main(int argc,char *argv[]) {
                            &nsumm, &nmeanm, &nmedianm,
                            &nmodem, &nsdm, &nfwhmm, &nlfwhmm, 0xff, FLAG_OUTPUT_ISBAD, 5);
         
+        if (verbose > 0) {
         fprintf(stderr, "   Mean   : %.2f\n", nmeanm);
         fprintf(stderr, "   Median : %.2f\n", nmedianm);
         fprintf(stderr, "   Mode   : %.2f\n", nmodem);
         fprintf(stderr, "   Stdev  : %.2f\n", nsdm);
+        }
         if (verbose >= 2) fprintf(stderr, "   FWHM   : %.2f\n", nfwhmm);
         if (verbose >= 2) fprintf(stderr, "   lFWHM  : %.2f\n", nlfwhmm);
         
         /* find ratio for GOOD pixels only */
+        if (verbose > 0) {
         if (!(kernelImIn))
             fprintf(stderr, " Emperical / Expected Noise for OK pixels = %.2f\n\n", sdm / nmeanm);
+        }
         
         /* scale noise in OK pixels so that the ratios are equal! */
         if (rescaleOK) {
@@ -1555,7 +1579,7 @@ int main(int argc,char *argv[]) {
                 ;
             
             if (diffrat > 1) {
-                fprintf(stderr, " Scale OK pixel noise by = %.2f\n", diffrat);
+                if (verbose > 0) fprintf(stderr, " Scale OK pixel noise by = %.2f\n", diffrat);
                 if (convTmpl)
                     for (l = rPixX*rPixY; l--; ) {
                         if ( (mRData[l] & 0xff) && (!(mRData[l] & FLAG_OUTPUT_ISBAD)) )
@@ -1568,7 +1592,7 @@ int main(int argc,char *argv[]) {
                     }
             }
             else
-                fprintf(stderr, " Leave OK pixel noise as-is\n");
+                if (verbose > 0) fprintf(stderr, " Leave OK pixel noise as-is\n");
         }
         
         /* BAD pixels are nothing but bad... */
