@@ -139,6 +139,7 @@ def reject_region_star(
     input_mask,
     noise_sq,
     verbose=0,
+    basis_lr_maps=None,
 ):
     rid = stamp.region_id
     reg = next((r for r in region_map.regions if r.id == rid), None)
@@ -187,6 +188,7 @@ def reject_region_star(
             oversample,
             input_mask=input_mask,
             noise_sq=noise_sq,
+            basis_lr_maps=basis_lr_maps,
         )
 
     if reg is not None and reg.npix >= min_npix and any(p not in reg.excluded_xy for p in reg.member_xy):
@@ -235,6 +237,8 @@ def fit_kernel_regions(
     skip_local_reject=False,
     noise_sq=None,
     mask=None,
+    basis_lr_maps=None,
+    prefilled_by_region=None,
 ):
     """Iterative global fit for connected-region irregular stamps."""
     FLAG_INPUT_ISBAD = 0x80
@@ -264,6 +268,7 @@ def fit_kernel_regions(
     lr_nx = nx // oversample if oversample > 1 else nx
 
     regions_by_id = {r.id: r for r in region_map.regions}
+    prefilled_by_region = prefilled_by_region or {}
     valid_stamps = []
     for gidx, group in enumerate(stamp_groups):
         if not group:
@@ -274,6 +279,37 @@ def fit_kernel_regions(
         reg = regions_by_id.get(int(rid)) if rid is not None else None
         if reg is None:
             continue
+
+        pref = prefilled_by_region.get(int(reg.id))
+        if (
+            pref is not None
+            and getattr(pref, "vectors", None) is not None
+            and getattr(pref, "ys", None) is not None
+            and not getattr(pref, "ignore", False)
+        ):
+            # Copy into a fresh Stamp so iterative reject cannot mutate FOM state
+            stamp = Stamp(int(round(reg.x_flux)), int(round(reg.y_flux)), orig_idx=gidx)
+            stamp.region_id = int(reg.id)
+            stamp.nss = 1
+            stamp.sscnt = 0
+            stamp.substamp_coords = [(stamp.x, stamp.y)]
+            stamp.ys = np.asarray(pref.ys).copy()
+            stamp.xs = np.asarray(pref.xs).copy()
+            stamp.npix = pref.npix
+            stamp.substamp = np.asarray(pref.substamp, dtype=np.float64).copy()
+            stamp.vectors = np.asarray(pref.vectors, dtype=np.float64).copy()
+            stamp.spatial_x = float(getattr(pref, "spatial_x", reg.x_flux))
+            stamp.spatial_y = float(getattr(pref, "spatial_y", reg.y_flux))
+            stamp.noise_pix = (
+                np.asarray(pref.noise_pix, dtype=np.float64).copy()
+                if getattr(pref, "noise_pix", None) is not None
+                else None
+            )
+            stamp.ignore = False
+            _set_spatial_weights(stamp, ker_order, lr_nx, lr_ny)
+            valid_stamps.append(stamp)
+            continue
+
         stamp = Stamp(int(round(reg.x_flux)), int(round(reg.y_flux)), orig_idx=gidx)
         stamp.region_id = int(reg.id)
         stamp.nss = 1
@@ -290,6 +326,7 @@ def fit_kernel_regions(
             oversample,
             input_mask=mask,
             noise_sq=noise_sq,
+            basis_lr_maps=basis_lr_maps,
         )
         if not ok:
             continue
@@ -390,6 +427,7 @@ def fit_kernel_regions(
                 mask,
                 noise_sq,
                 verbose=verbose,
+                basis_lr_maps=basis_lr_maps,
             )
             need_refit = True
 
@@ -432,6 +470,7 @@ def fit_kernel_regions(
                         mask,
                         noise_sq,
                         verbose=verbose,
+                        basis_lr_maps=basis_lr_maps,
                     )
                     need_refit = True
 
