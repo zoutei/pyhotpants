@@ -64,6 +64,14 @@ class HotpantsConfig:
         sigma_image_file (str): Path to save the sigma (difference/noise) FITS image. (Default: None).
         stamp_region_file (str): Path to save the DS9 region file of stamps. (Default: None).
 
+        Connected-region stamps (pure Python only)
+        ------------------------------------------
+        stamp_mode (str): ``"grid"`` (classic) or ``"connected_regions"``.
+        region_max_diameter (float): Split islands larger than this bbox span (px).
+        region_weight (str): Equation weight ``uniform`` / ``npix`` / ``flux`` / ``invvar``.
+        region_min_npix (int|None): Floor on good pixels after exclusion; ``None`` → one paint box.
+        region_bisect_on_reject (bool): Split region if star exclusion leaves it too small.
+
         Kernel composition parameters
         -----------------------------
         The following parameters control how the convolution kernel is constructed from a sum of Gaussians. They mirror the `-ng` style flags in the original HOTPANTS tool and are passed through to the C layer where the kernel basis is built.
@@ -159,6 +167,20 @@ class HotpantsConfig:
         # [-convvar]        : convolve variance not noise (0)
         self.conv_var = kwargs.get("conv_var", False)
         self.use_pca = kwargs.get("use_pca", False)
+        # Pure-path Tikhonov regularization (relative to mean matrix diagonal; 0 = off)
+        self.lambda_reg = kwargs.get("lambda_reg", 0.0)
+
+        # Connected-region stamps (pure Python only; stamp_mode="grid" is classic)
+        self.stamp_mode = kwargs.get("stamp_mode", "grid")
+        self.region_max_diameter = kwargs.get("region_max_diameter", 40.0)
+        self.region_max_area = kwargs.get("region_max_area", 0)
+        self.region_connectivity = kwargs.get("region_connectivity", 8)
+        self.region_rss = kwargs.get("region_rss", None)  # None → use rss
+        self.region_weight = kwargs.get("region_weight", "npix")
+        self.region_min_npix = kwargs.get("region_min_npix", None)  # None → (2*rss+1)^2
+        self.region_bisect_on_reject = kwargs.get("region_bisect_on_reject", False)
+        self.region_max_bisects = kwargs.get("region_max_bisects", 100)
+        self.region_weight_cap = kwargs.get("region_weight_cap", (0.25, 4.0))
 
         # Assumed single region for this wrapper
         # [-nrx xregion]    : number of image regions in x dimension (1)

@@ -7,3 +7,4 @@ __pycache__/
 *.pyc
 *.so
 .DS_Store
+dev/_development_worktree/

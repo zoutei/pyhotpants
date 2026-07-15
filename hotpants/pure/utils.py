@@ -184,6 +184,20 @@ def calculate_noise(data, mask=None, n_stat=100, max_iter=5):
 # Masking & Stamp Finding
 # =========================================================
 
+# Match globals.h FLAG_* values used by makeInputMask / spreadMask / borders.
+FLAG_BAD_PIXVAL = 0x01
+FLAG_SAT_PIXEL = 0x02
+FLAG_LOW_PIXEL = 0x04
+FLAG_ISNAN = 0x08
+FLAG_INPUT_MASK = 0x20
+FLAG_OK_CONV = 0x40
+FLAG_INPUT_ISBAD = 0x80
+FLAG_T_BAD = 0x100
+FLAG_I_BAD = 0x400
+FLAG_T_SKIP = 0x200
+FLAG_I_SKIP = 0x800
+
+
 def mask_pixels(image, low_thresh=None, high_thresh=None, bitmask=None):
     """
     Create input mask based on thresholds and input bitmask.
@@ -207,6 +221,392 @@ def mask_pixels(image, low_thresh=None, high_thresh=None, bitmask=None):
         mask |= (bitmask != 0)
         
     return mask
+
+
+def upsample_lr_to_hr(arr_lr, factor: int):
+    """np.repeat both axes. factor==1 returns arr_lr (no copy needed if factor==1)."""
+    if factor == 1:
+        return arr_lr
+    return np.repeat(np.repeat(arr_lr, factor, axis=0), factor, axis=1)
+
+
+def downsample_hr_mask_to_lr(mask_hr: np.ndarray, factor: int) -> np.ndarray:
+    """OR-reduce all bits over factor x factor blocks. Return int32 LR mask.
+
+    Mirror apply_kernel mask downsampling loop.
+    """
+    if factor == 1:
+        return np.asarray(mask_hr, dtype=np.int32, copy=False)
+    mask_hr = np.asarray(mask_hr, dtype=np.int32)
+    ny_hr, nx_hr = mask_hr.shape
+    ny_lr = ny_hr // factor
+    nx_lr = nx_hr // factor
+    mask_out_lr = np.zeros((ny_lr, nx_lr), dtype=np.int32)
+    for oy in range(factor):
+        for ox in range(factor):
+            mask_out_lr |= mask_hr[oy::factor, ox::factor][:ny_lr, :nx_lr]
+    return mask_out_lr
+
+
+def spread_mask(m_data: np.ndarray, width: int) -> None:
+    """In-place spread of FLAG_INPUT_ISBAD, matching spreadMask() in functions.c."""
+    if width <= 0:
+        return
+    w2 = width // 2
+    ny, nx = m_data.shape
+    bad = np.argwhere(m_data & FLAG_INPUT_ISBAD)
+    for j, i in bad:
+        for k in range(-w2, w2 + 1):
+            ii = i + k
+            if ii < 0 or ii >= nx:
+                continue
+            for l in range(-w2, w2 + 1):
+                jj = j + l
+                if jj < 0 or jj >= ny:
+                    continue
+                if not (m_data[jj, ii] & FLAG_INPUT_ISBAD):
+                    m_data[jj, ii] |= FLAG_OK_CONV
+
+
+def make_input_mask(
+    template: np.ndarray,
+    image: np.ndarray,
+    config,
+    t_mask: np.ndarray | None = None,
+    i_mask: np.ndarray | None = None,
+    oversample: int = 1,
+) -> np.ndarray:
+    """
+    Build an int32 input mask matching hotpants_ext.make_input_mask / makeInputMask.
+
+    Output shape always matches template (HR when oversample > 1).
+    """
+    F = int(oversample)
+    ny_hr, nx_hr = template.shape
+    m_data = np.zeros((ny_hr, nx_hr), dtype=np.int32)
+
+    fill = float(getattr(config, "fillval", 1.0e-30))
+    t_u = float(config.tuthresh)
+    t_l = float(config.tlthresh)
+    i_u = float(config.iuthresh)
+    i_l = float(config.ilthresh)
+
+    if F == 1:
+        if t_mask is not None:
+            m_data[t_mask > 0] |= FLAG_INPUT_MASK
+        if i_mask is not None:
+            m_data[i_mask > 0] |= FLAG_INPUT_MASK
+
+        # Exact makeInputMask() predicates (NaNs do not satisfy == / >= / <= in C either).
+        m_data[(template == fill) | (image == fill)] |= FLAG_INPUT_ISBAD | FLAG_BAD_PIXVAL
+        m_data[(template >= t_u) | (image >= i_u)] |= FLAG_INPUT_ISBAD | FLAG_SAT_PIXEL
+        m_data[(template <= t_l) | (image <= i_l)] |= FLAG_INPUT_ISBAD | FLAG_LOW_PIXEL
+        m_data[np.isnan(template) | np.isnan(image)] |= FLAG_ISNAN | FLAG_INPUT_ISBAD
+
+        spread = int(config.rkernel * getattr(config, "kf_spread_mask1", 1.0))
+        s_border = int(config.rss + config.rkernel)
+    else:
+        ny_lr, nx_lr = image.shape
+        if template.shape != (ny_lr * F, nx_lr * F):
+            raise ValueError(
+                f"make_input_mask oversample={F}: template shape {template.shape} "
+                f"!= image shape {image.shape} * {F}"
+            )
+
+        if t_mask is not None:
+            m_data[t_mask > 0] |= FLAG_INPUT_MASK
+        if i_mask is not None:
+            i_mask_hr = upsample_lr_to_hr(i_mask, F)
+            m_data[i_mask_hr > 0] |= FLAG_INPUT_MASK
+
+        image_hr = upsample_lr_to_hr(image, F)
+
+        m_data[template == fill] |= FLAG_INPUT_ISBAD | FLAG_BAD_PIXVAL
+        m_data[image_hr == fill] |= FLAG_INPUT_ISBAD | FLAG_BAD_PIXVAL
+        m_data[template >= t_u] |= FLAG_INPUT_ISBAD | FLAG_SAT_PIXEL
+        m_data[image_hr >= i_u] |= FLAG_INPUT_ISBAD | FLAG_SAT_PIXEL
+        m_data[template <= t_l] |= FLAG_INPUT_ISBAD | FLAG_LOW_PIXEL
+        m_data[image_hr <= i_l] |= FLAG_INPUT_ISBAD | FLAG_LOW_PIXEL
+        m_data[np.isnan(template)] |= FLAG_ISNAN | FLAG_INPUT_ISBAD
+        m_data[np.isnan(image_hr)] |= FLAG_ISNAN | FLAG_INPUT_ISBAD
+
+        spread = int(config.rkernel * getattr(config, "kf_spread_mask1", 1.0)) * F
+        s_border = int(config.rss + config.rkernel) * F
+
+    spread_mask(m_data, spread)
+
+    # Border mask: hwKSStamp + hwKernel
+    m_data[:, :s_border] |= FLAG_T_BAD | FLAG_I_BAD
+    m_data[:, nx_hr - s_border :] |= FLAG_T_BAD | FLAG_I_BAD
+    m_data[:s_border, s_border : nx_hr - s_border] |= FLAG_T_BAD | FLAG_I_BAD
+    m_data[ny_hr - s_border :, s_border : nx_hr - s_border] |= FLAG_T_BAD | FLAG_I_BAD
+
+    return m_data
+
+
+def _check_psf_center(
+    data: np.ndarray,
+    mask: np.ndarray,
+    xmax: int,
+    ymax: int,
+    s_xmin: int,
+    s_ymin: int,
+    s_pix_x: int,
+    s_pix_y: int,
+    hw_ks: int,
+    hi_thresh: float,
+    sky: float,
+    inv_dsky: float,
+    fit_thresh: float,
+    bad_bits: int,
+    sat_bit: int,
+) -> float:
+    """Port of checkPsfCenter() using stamp-local centers like the C code."""
+    ny, nx = data.shape
+    # Convert to stamp-local coordinates (C passes xmax - x0, ymax - y0).
+    jmax = ymax - s_ymin
+    imax = xmax - s_xmin
+    dmax2 = 0.0
+    for l in range(jmax - hw_ks, jmax + hw_ks + 1):
+        if l < 0 or l >= s_pix_y:
+            continue
+        yr2 = l + s_ymin
+        for k in range(imax - hw_ks, imax + hw_ks + 1):
+            if k < 0 or k >= s_pix_x:
+                continue
+            xr2 = k + s_xmin
+            if mask[yr2, xr2] & bad_bits:
+                return 0.0
+            dpt2 = float(data[yr2, xr2])
+            if dpt2 >= hi_thresh:
+                mask[yr2, xr2] |= sat_bit
+                return 0.0
+            if ((dpt2 - sky) * inv_dsky) > fit_thresh:
+                dmax2 += dpt2
+    return dmax2
+
+
+def _mark_skip_like_c(mask: np.ndarray, xmax: int, ymax: int, hw_ks: int, skip_bit: int) -> None:
+    """
+    Replicate buildStamps' skip masking, including its index order:
+    nr2 = l + rPixX * k with l in ymax±hw, k in xmax±hw.
+    """
+    ny, nx = mask.shape
+    flat = mask.reshape(-1)
+    n_tot = nx * ny
+    for l in range(ymax - hw_ks, ymax + hw_ks + 1):
+        for k in range(xmax - hw_ks, xmax + hw_ks + 1):
+            nr2 = l + nx * k
+            if 0 <= nr2 < n_tot:
+                flat[nr2] |= skip_bit
+
+
+def find_stamps_from_catalog(template, image, mask, catalog, config, oversample: int = 1):
+    """
+    Catalog stamp search matching hotpants_ext.find_stamps + buildStamps(getCenters=0).
+
+    Returns (template_substamps, image_substamps) as lists of dicts with
+    substamp_id, stamp_group_id, x, y — same schema as the C extension.
+
+    When oversample > 1, template and mask are HR; image and catalog (x, y) are LR.
+    """
+    F = int(oversample)
+    if F == 1:
+        ny_lr, nx_lr = template.shape
+        m_work_hr = mask.astype(np.int32, copy=True)
+        m_work_lr = m_work_hr
+    else:
+        ny_lr, nx_lr = image.shape
+        if template.shape != (ny_lr * F, nx_lr * F):
+            raise ValueError(
+                f"find_stamps_from_catalog oversample={F}: template shape {template.shape} "
+                f"!= image shape {image.shape} * {F}"
+            )
+        m_work_hr = mask.astype(np.int32, copy=True)
+        m_work_lr = downsample_hr_mask_to_lr(m_work_hr, F)
+
+    n_stamp_x = int(config.nstampx)
+    n_stamp_y = int(config.nstampy)
+    fw_stamp = int(getattr(config, "fwstamp", 0)) or max(
+        int(min(nx_lr / n_stamp_x, ny_lr / n_stamp_y) - (2 * config.rkernel + 1)),
+        2 * config.rss + 2 * config.rkernel + 1,
+    )
+    hw_kernel = int(config.rkernel)
+    hw_ks = int(config.rss)
+    hw_ks_hr = hw_ks * F
+    n_ks = int(config.nss)
+    force = str(getattr(config, "force_convolve", "b"))
+    fit_thresh = float(config.fitthresh)
+    t_uk = float(config.tuktresh if config.tuktresh is not None else config.tuthresh)
+    i_uk = float(config.iuktresh if config.iuktresh is not None else config.iuthresh)
+
+    cat = np.asarray(catalog, dtype=np.float32)
+    t_groups = []
+    i_groups = []
+
+    r_xmin, r_ymin = 0, 0
+    r_xmax, r_ymax = nx_lr - 1, ny_lr - 1
+
+    nt_s = 0
+    ni_s = 0
+    n_stamps_max = n_stamp_x * n_stamp_y
+
+    for l in range(n_stamp_y):
+        for k in range(n_stamp_x):
+            s_xmin = r_xmin + int(k * float(r_xmax - r_xmin + 1) / n_stamp_x)
+            s_ymin = r_ymin + int(l * float(r_ymax - r_ymin + 1) / n_stamp_y)
+            s_xmax = min(s_xmin + fw_stamp - 1, r_xmax)
+            s_ymax = min(s_ymin + fw_stamp - 1, r_ymax)
+            s_pix_x = s_xmax - s_xmin + 1
+            s_pix_y = s_ymax - s_ymin + 1
+
+            t_xss, t_yss = [], []
+            i_xss, i_yss = [], []
+
+            if F == 1:
+                t_cut = template[s_ymin : s_ymax + 1, s_xmin : s_xmax + 1]
+                i_cut = image[s_ymin : s_ymax + 1, s_xmin : s_xmax + 1]
+                t_m = (m_work_hr[s_ymin : s_ymax + 1, s_xmin : s_xmax + 1] & 0xBF) != 0
+                i_m = t_m
+            else:
+                y0_hr, y1_hr = s_ymin * F, (s_ymax + 1) * F
+                x0_hr, x1_hr = s_xmin * F, (s_xmax + 1) * F
+                t_cut = template[y0_hr:y1_hr, x0_hr:x1_hr]
+                i_cut = image[s_ymin : s_ymax + 1, s_xmin : s_xmax + 1]
+                t_m = (m_work_hr[y0_hr:y1_hr, x0_hr:x1_hr] & 0xBF) != 0
+                i_m = (m_work_lr[s_ymin : s_ymax + 1, s_xmin : s_xmax + 1] & 0xBF) != 0
+
+            try:
+                t_fwhm, t_mode = calculate_noise(t_cut, mask=t_m)
+            except Exception:
+                t_fwhm, t_mode = 1.0, 0.0
+            try:
+                i_fwhm, i_mode = calculate_noise(i_cut, mask=i_m)
+            except Exception:
+                i_fwhm, i_mode = 1.0, 0.0
+            if not np.isfinite(t_fwhm) or t_fwhm <= 0:
+                t_fwhm = 1.0
+            if not np.isfinite(i_fwhm) or i_fwhm <= 0:
+                i_fwhm = 1.0
+            if not np.isfinite(t_mode):
+                t_mode = 0.0
+            if not np.isfinite(i_mode):
+                i_mode = 0.0
+
+            for entry in cat:
+                x_pos = int(round(float(entry[0])))
+                y_pos = int(round(float(entry[1])))
+                if not (
+                    (x_pos > s_xmin + hw_kernel + 1)
+                    and (x_pos < s_xmax - hw_kernel - 1)
+                    and (y_pos > s_ymin + hw_kernel + 1)
+                    and (y_pos < s_ymax - hw_kernel - 1)
+                ):
+                    continue
+
+                if force != "i" and len(t_xss) < n_ks:
+                    if F == 1:
+                        t_x, t_y = x_pos, y_pos
+                        t_sx, t_sy = s_xmin, s_ymin
+                        t_spx, t_spy = s_pix_x, s_pix_y
+                        t_hw = hw_ks
+                        t_mask_work = m_work_hr
+                    else:
+                        t_x, t_y = x_pos * F, y_pos * F
+                        t_sx, t_sy = s_xmin * F, s_ymin * F
+                        t_spx, t_spy = s_pix_x * F, s_pix_y * F
+                        t_hw = hw_ks_hr
+                        t_mask_work = m_work_hr
+                    check = _check_psf_center(
+                        template,
+                        t_mask_work,
+                        t_x,
+                        t_y,
+                        t_sx,
+                        t_sy,
+                        t_spx,
+                        t_spy,
+                        t_hw,
+                        t_uk,
+                        t_mode,
+                        1.0 / t_fwhm,
+                        fit_thresh,
+                        FLAG_T_BAD | FLAG_T_SKIP | 0xBF,
+                        FLAG_T_BAD,
+                    )
+                    if check != 0.0:
+                        _mark_skip_like_c(t_mask_work, t_x, t_y, t_hw, FLAG_T_SKIP)
+                        t_xss.append(x_pos)
+                        t_yss.append(y_pos)
+
+                if force != "t" and len(i_xss) < n_ks:
+                    check = _check_psf_center(
+                        image,
+                        m_work_lr,
+                        x_pos,
+                        y_pos,
+                        s_xmin,
+                        s_ymin,
+                        s_pix_x,
+                        s_pix_y,
+                        hw_ks,
+                        i_uk,
+                        i_mode,
+                        1.0 / i_fwhm,
+                        fit_thresh,
+                        FLAG_I_BAD | FLAG_I_SKIP | 0xBF,
+                        FLAG_I_BAD,
+                    )
+                    if check != 0.0:
+                        _mark_skip_like_c(m_work_lr, x_pos, y_pos, hw_ks, FLAG_I_SKIP)
+                        i_xss.append(x_pos)
+                        i_yss.append(y_pos)
+
+            if force != "i" and t_xss:
+                t_groups.append((t_xss, t_yss))
+                nt_s += 1
+            if force != "t" and i_xss:
+                i_groups.append((i_xss, i_yss))
+                ni_s += 1
+
+            if nt_s >= n_stamps_max or ni_s >= n_stamps_max:
+                break
+        if nt_s >= n_stamps_max or ni_s >= n_stamps_max:
+            break
+
+    t_out, i_out = [], []
+    sid = 0
+    for gid, (xss, yss) in enumerate(t_groups):
+        for x, y in zip(xss, yss):
+            t_out.append({"substamp_id": sid, "stamp_group_id": gid, "x": int(x), "y": int(y)})
+            sid += 1
+    sid = 0
+    for gid, (xss, yss) in enumerate(i_groups):
+        for x, y in zip(xss, yss):
+            i_out.append({"substamp_id": sid, "stamp_group_id": gid, "x": int(x), "y": int(y)})
+            sid += 1
+    return t_out, i_out
+
+
+def _mask_pixel_is_bad(mask: np.ndarray, y: int, x: int) -> bool:
+    """True if pixel is rejected for stamp finding.
+
+    Integer masks: reject any flag except pure FLAG_OK_CONV (spread halo).
+    Bool masks: truthiness.
+    """
+    v = mask[y, x]
+    if mask.dtype == np.bool_ or mask.dtype == bool:
+        return bool(v)
+    return (int(v) & ~FLAG_OK_CONV) != 0
+
+
+def _mask_region_has_bad(mask: np.ndarray, y0: int, y1: int, x0: int, x1: int) -> bool:
+    """True if any pixel in region is rejected for stamp finding."""
+    region = mask[y0:y1, x0:x1]
+    if region.dtype == np.bool_ or region.dtype == bool:
+        return bool(np.any(region))
+    return bool(np.any((region.astype(np.int32) & ~FLAG_OK_CONV) != 0))
+
 
 def find_stamps(image, mask, n_stamps, box_size, border_width=10):
     """
@@ -234,7 +634,7 @@ def find_stamps(image, mask, n_stamps, box_size, border_width=10):
     
     for y, x in zip(y_peaks, x_peaks):
         # 1. Check Mask (Point check)
-        if mask[y, x]:
+        if _mask_pixel_is_bad(mask, y, x):
             continue
             
         # 2. Check Borders
@@ -249,7 +649,7 @@ def find_stamps(image, mask, n_stamps, box_size, border_width=10):
         y0 = max(0, y - half_box)
         y1 = min(h, y + half_box + 1)
         
-        if np.any(mask[y0:y1, x0:x1]):
+        if _mask_region_has_bad(mask, y0, y1, x0, x1):
             continue
             
         # 4. Calculate Flux (Metric)
