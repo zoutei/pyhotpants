@@ -72,86 +72,97 @@ class Stamp:
         self.npix = None
         self.noise_pix = None  # per-pixel noise variance aligned with substamp
 
-def populate_stamp_vectors(stamp, template, image, config, kernel_vecs, oversample=1):
+def populate_stamp_vectors(
+    stamp, template, image, config, kernel_vecs, oversample=1, basis_lr_maps=None
+):
     """
     Populates the stamp with data, template, and basis vectors.
     Returns True if successful, False if stamp is out of bounds or invalid.
 
     Stamp (x, y) are always science-image (LR) coordinates. When oversample>1,
-    `template` is HR and the patch is taken at y0*oversample (etc.), then
-    basis convolutions are downsampled to the LR stamp grid.
+    `template` is HR. Prefer `basis_lr_maps` (n_ker, ny, nx) from
+    ``os_precompute.precompute_basis_lr_maps`` to avoid per-stamp HR convolution.
     """
     half_stamp = config.rss
     # Determine kernel radius in HR pixels
     h_basis_hr, w_basis_hr = kernel_vecs[0].shape
     half_r_hr = w_basis_hr // 2
-    
+
     n_comp_ker = len(kernel_vecs)
     bg_order = config.bgo
-    
+
     # 1. Extract Data (Image)
     y, x = stamp.y, stamp.x
     y0 = int(y - half_stamp)
     y1 = int(y + half_stamp + 1)
     x0 = int(x - half_stamp)
     x1 = int(x + half_stamp + 1)
-    
+
     if y0 < 0 or x0 < 0 or y1 > image.shape[0] or x1 > image.shape[1]:
         return False
-        
+
     data_stamp = image[y0:y1, x0:x1]
     if np.any(np.isnan(data_stamp)):
-        return False # Reject stamps with NaNs in data
-        
+        return False  # Reject stamps with NaNs in data
+
     stamp.substamp = data_stamp.flatten()
     stamp.image_cutout = data_stamp.copy()
-    
-    # 2. Extract Template Patch
-    # HR extraction logic
-    y0_t_hr = int(y0 * oversample - half_r_hr)
-    y1_t_hr = int(y1 * oversample + half_r_hr)
-    x0_t_hr = int(x0 * oversample - half_r_hr)
-    x1_t_hr = int(x1 * oversample + half_r_hr)
-    
-    if y0_t_hr < 0 or x0_t_hr < 0 or y1_t_hr > template.shape[0] or x1_t_hr > template.shape[1]:
-        return False
-        
-    template_patch = template[y0_t_hr:y1_t_hr, x0_t_hr:x1_t_hr]
-    if np.any(np.isnan(template_patch)):
-        return False
-        
-    stamp.template_cutout = template_patch.copy()
-    
-    # 3. generate Basis Vectors
-    vectors = []
-    basis_cutouts = []
-    
-    for k in range(n_comp_ker):
-        basis_k = kernel_vecs[k]
-        conv_res_hr = jit_convolve_patch(template_patch, basis_k)
-        
-        if oversample > 1:
-            conv_res = downsample_image(conv_res_hr, oversample)
-        else:
-            conv_res = conv_res_hr
-            
-        # Verify shape
-        if conv_res.shape != data_stamp.shape:
-            # Should not happen if logic is correct
-            return False
-            
-        v = conv_res.flatten()
-        vectors.append(v)
-        basis_cutouts.append(conv_res)
-        
-    # 4. Background Vectors — order must match fillStamp / get_background
-    # ax*=xf outer, ay*=yf inner (NOT total-degree order).
-    nx_glob = template.shape[1] / oversample
-    ny_glob = template.shape[0] / oversample
 
     gy, gx = np.indices(data_stamp.shape)
     gy = gy + y0
     gx = gx + x0
+
+    # 3. Basis vectors: OS>1 uses precomputed LR maps when provided
+    vectors = []
+    basis_cutouts = []
+
+    if oversample > 1 and basis_lr_maps is not None:
+        blr = np.asarray(basis_lr_maps)
+        if blr.shape[0] != n_comp_ker:
+            return False
+        # Edge: maps are NaN where HR support was OOB
+        for k in range(n_comp_ker):
+            conv_res = blr[k, y0:y1, x0:x1]
+            if conv_res.shape != data_stamp.shape or np.any(~np.isfinite(conv_res)):
+                return False
+            vectors.append(conv_res.flatten())
+            basis_cutouts.append(conv_res)
+        stamp.template_cutout = None
+    else:
+        # 2. Extract Template Patch (native or fallback OS path)
+        y0_t_hr = int(y0 * oversample - half_r_hr)
+        y1_t_hr = int(y1 * oversample + half_r_hr)
+        x0_t_hr = int(x0 * oversample - half_r_hr)
+        x1_t_hr = int(x1 * oversample + half_r_hr)
+
+        if y0_t_hr < 0 or x0_t_hr < 0 or y1_t_hr > template.shape[0] or x1_t_hr > template.shape[1]:
+            return False
+
+        template_patch = template[y0_t_hr:y1_t_hr, x0_t_hr:x1_t_hr]
+        if np.any(np.isnan(template_patch)):
+            return False
+
+        stamp.template_cutout = template_patch  # view OK; no defensive copy on hot path
+
+        for k in range(n_comp_ker):
+            basis_k = kernel_vecs[k]
+            conv_res_hr = jit_convolve_patch(template_patch, basis_k)
+
+            if oversample > 1:
+                conv_res = downsample_image(conv_res_hr, oversample)
+            else:
+                conv_res = conv_res_hr
+
+            if conv_res.shape != data_stamp.shape:
+                return False
+
+            v = conv_res.flatten()
+            vectors.append(v)
+            basis_cutouts.append(conv_res)
+
+    # 4. Background Vectors — order must match fillStamp / get_background
+    nx_glob = template.shape[1] / oversample
+    ny_glob = template.shape[0] / oversample
 
     ny_norm = (gy - 0.5 * ny_glob) / (0.5 * ny_glob)
     nx_norm = (gx - 0.5 * nx_glob) / (0.5 * nx_glob)
@@ -166,10 +177,10 @@ def populate_stamp_vectors(stamp, template, image, config, kernel_vecs, oversamp
 
     stamp.vectors = np.array(vectors)
     stamp.basis_vectors = np.array(basis_cutouts)
-    
+
     if np.any(np.isnan(stamp.vectors)):
         return False
-        
+
     return True
 
 
@@ -184,11 +195,15 @@ def populate_region_vectors(
     oversample=1,
     input_mask=None,
     noise_sq=None,
+    basis_lr_maps=None,
 ):
     """
     Fill an irregular connected-region stamp: science = all good pixels with
     labels==region.id; template bases convolved on bbox dilated by rkernel,
     then gathered at those pixels.
+
+    When oversample>1 and ``basis_lr_maps`` is provided, gather from the
+    precomputed LR basis maps (JAX path) instead of per-region HR convolution.
     """
     from .regions import effective_min_npix
     from .utils import FLAG_INPUT_ISBAD
@@ -222,52 +237,64 @@ def populate_region_vectors(
 
     y0, y1 = int(ys.min()), int(ys.max()) + 1
     x0, x1 = int(xs.min()), int(xs.max()) + 1
-    # Visualization cutout (dense bbox, NaN outside mask)
-    cut = np.full((y1 - y0, x1 - x0), np.nan, dtype=np.float32)
-    cut[ys - y0, xs - x0] = image[ys, xs]
-    stamp.image_cutout = cut
-
-    # Template patch: bbox dilated by half_r so jit_convolve_patch output
-    # aligns with [y0:y1, x0:x1] (same as populate_stamp_vectors).
-    y0_t = int(y0 * F - half_r_hr)
-    y1_t = int(y1 * F + half_r_hr)
-    x0_t = int(x0 * F - half_r_hr)
-    x1_t = int(x1 * F + half_r_hr)
-
-    if y0_t < 0 or x0_t < 0 or y1_t > template.shape[0] or x1_t > template.shape[1]:
-        return False
-
-    template_patch = template[y0_t:y1_t, x0_t:x1_t]
-    if np.any(np.isnan(template_patch)):
-        return False
-    stamp.template_cutout = template_patch.copy()
+    # Visualization cutout (dense bbox, NaN outside mask) — skip expensive copy on OS path
+    if F == 1:
+        cut = np.full((y1 - y0, x1 - x0), np.nan, dtype=np.float32)
+        cut[ys - y0, xs - x0] = image[ys, xs]
+        stamp.image_cutout = cut
+    else:
+        stamp.image_cutout = None
 
     vectors = []
-    for k in range(n_comp_ker):
-        conv_hr = jit_convolve_patch(template_patch, kernel_vecs[k])
-        if F > 1:
-            conv_lr = downsample_image(conv_hr.astype(np.float64), F)
-            # LR output should match [y0:y1, x0:x1]
-            if conv_lr.shape != (y1 - y0, x1 - x0):
-                # tolerate 1-pixel rounding: gather via absolute mapping
-                yl = ys - y0
-                xl = xs - x0
-                if (
-                    yl.min() < 0
-                    or xl.min() < 0
-                    or yl.max() >= conv_lr.shape[0]
-                    or xl.max() >= conv_lr.shape[1]
-                ):
-                    return False
-                gathered = conv_lr[yl, xl]
-            else:
-                gathered = conv_lr[ys - y0, xs - x0]
-        else:
-            # OS=1: conv shape == (y1-y0, x1-x0)
-            if conv_hr.shape != (y1 - y0, x1 - x0):
+    if F > 1 and basis_lr_maps is not None:
+        blr = np.asarray(basis_lr_maps)
+        if blr.shape[0] != n_comp_ker:
+            return False
+        # Reject if any gathered pixel lacks finite basis support (edge)
+        for k in range(n_comp_ker):
+            gathered = blr[k, ys, xs]
+            if np.any(~np.isfinite(gathered)):
                 return False
-            gathered = conv_hr[ys - y0, xs - x0]
-        vectors.append(np.asarray(gathered, dtype=np.float64).ravel())
+            vectors.append(np.asarray(gathered, dtype=np.float64).ravel())
+        stamp.template_cutout = None
+    else:
+        # Template patch: bbox dilated by half_r so jit_convolve_patch output
+        # aligns with [y0:y1, x0:x1] (same as populate_stamp_vectors).
+        y0_t = int(y0 * F - half_r_hr)
+        y1_t = int(y1 * F + half_r_hr)
+        x0_t = int(x0 * F - half_r_hr)
+        x1_t = int(x1 * F + half_r_hr)
+
+        if y0_t < 0 or x0_t < 0 or y1_t > template.shape[0] or x1_t > template.shape[1]:
+            return False
+
+        template_patch = template[y0_t:y1_t, x0_t:x1_t]
+        if np.any(np.isnan(template_patch)):
+            return False
+        stamp.template_cutout = template_patch  # no defensive copy
+
+        for k in range(n_comp_ker):
+            conv_hr = jit_convolve_patch(template_patch, kernel_vecs[k])
+            if F > 1:
+                conv_lr = downsample_image(conv_hr.astype(np.float64), F)
+                if conv_lr.shape != (y1 - y0, x1 - x0):
+                    yl = ys - y0
+                    xl = xs - x0
+                    if (
+                        yl.min() < 0
+                        or xl.min() < 0
+                        or yl.max() >= conv_lr.shape[0]
+                        or xl.max() >= conv_lr.shape[1]
+                    ):
+                        return False
+                    gathered = conv_lr[yl, xl]
+                else:
+                    gathered = conv_lr[ys - y0, xs - x0]
+            else:
+                if conv_hr.shape != (y1 - y0, x1 - x0):
+                    return False
+                gathered = conv_hr[ys - y0, xs - x0]
+            vectors.append(np.asarray(gathered, dtype=np.float64).ravel())
 
     # Background at global pixel coords
     nx_glob = template.shape[1] / F
@@ -339,6 +366,7 @@ def fit_stamps_locally(
     region_map=None,
     input_mask=None,
     noise_sq=None,
+    basis_lr_maps=None,
 ):
     """
     Perform initial local fit on stamps to reject outliers.
@@ -375,11 +403,20 @@ def fit_stamps_locally(
                 oversample,
                 input_mask=input_mask,
                 noise_sq=noise_sq,
+                basis_lr_maps=basis_lr_maps,
             )
             if not ok:
                 continue
         else:
-            if not populate_stamp_vectors(stamp, template, image, config, kernel_vecs, oversample):
+            if not populate_stamp_vectors(
+                stamp,
+                template,
+                image,
+                config,
+                kernel_vecs,
+                oversample,
+                basis_lr_maps=basis_lr_maps,
+            ):
                 continue
 
         # Local Fit: Kernel Basis + Constant Background (C nComps = nCompKer + 1)
@@ -626,7 +663,18 @@ def _set_spatial_weights(stamp, ker_order, nx, ny):
     stamp.weights = np.asarray(weights, dtype=np.float64)
 
 
-def _advance_stamp_group(group_stamp, template, image, config, kernel_vecs, oversample, ker_order, nx, ny):
+def _advance_stamp_group(
+    group_stamp,
+    template,
+    image,
+    config,
+    kernel_vecs,
+    oversample,
+    ker_order,
+    nx,
+    ny,
+    basis_lr_maps=None,
+):
     """
     Advance to the next substamp in a group (C check_again: sscnt++ then fillStamp).
     Returns True if a valid substamp was loaded, False if the group is exhausted.
@@ -639,14 +687,36 @@ def _advance_stamp_group(group_stamp, template, image, config, kernel_vecs, over
         x, y = group_stamp.substamp_coords[group_stamp.sscnt]
         group_stamp.x = int(x)
         group_stamp.y = int(y)
-        if populate_stamp_vectors(group_stamp, template, image, config, kernel_vecs, oversample):
+        if populate_stamp_vectors(
+            group_stamp,
+            template,
+            image,
+            config,
+            kernel_vecs,
+            oversample,
+            basis_lr_maps=basis_lr_maps,
+        ):
             _set_spatial_weights(group_stamp, ker_order, nx, ny)
             group_stamp.ignore = False
             return True
         # Failed fill — try next substamp (same as C looping fillStamp failures)
 
 
-def fit_kernel(stamps, template, image, config, kernel_vecs, oversample=1, verbose=0, skip_local_reject=False, noise_sq=None, mask=None, region_map=None):
+def fit_kernel(
+    stamps,
+    template,
+    image,
+    config,
+    kernel_vecs,
+    oversample=1,
+    verbose=0,
+    skip_local_reject=False,
+    noise_sq=None,
+    mask=None,
+    region_map=None,
+    basis_lr_maps=None,
+    prefilled_by_region=None,
+):
     """
     Main Fitting Driver.
 
@@ -664,6 +734,8 @@ def fit_kernel(stamps, template, image, config, kernel_vecs, oversample=1, verbo
 
     noise_sq: optional combined noise-variance image for figMerit='v' (default).
     mask: optional int bitflag mask; FLAG_INPUT_ISBAD pixels skipped in sig.
+    basis_lr_maps: optional (n_ker, ny, nx) for oversample>1 gather fill.
+    prefilled_by_region: optional dict region_id -> Stamp already filled at FOM.
     """
     if region_map is not None:
         from .region_fitting import fit_kernel_regions
@@ -680,6 +752,8 @@ def fit_kernel(stamps, template, image, config, kernel_vecs, oversample=1, verbo
             skip_local_reject=skip_local_reject,
             noise_sq=noise_sq,
             mask=mask,
+            basis_lr_maps=basis_lr_maps,
+            prefilled_by_region=prefilled_by_region,
         )
 
     FLAG_INPUT_ISBAD = 0x80
@@ -720,11 +794,15 @@ def fit_kernel(stamps, template, image, config, kernel_vecs, oversample=1, verbo
         stamp.nss = len(coords)
         stamp.sscnt = 0
 
-        ok = populate_stamp_vectors(stamp, template, image, config, kernel_vecs, oversample)
+        ok = populate_stamp_vectors(
+            stamp, template, image, config, kernel_vecs, oversample, basis_lr_maps=basis_lr_maps
+        )
         while not ok and stamp.sscnt + 1 < stamp.nss:
             stamp.sscnt += 1
             stamp.x, stamp.y = coords[stamp.sscnt]
-            ok = populate_stamp_vectors(stamp, template, image, config, kernel_vecs, oversample)
+            ok = populate_stamp_vectors(
+                stamp, template, image, config, kernel_vecs, oversample, basis_lr_maps=basis_lr_maps
+            )
         if not ok:
             continue
 
@@ -837,7 +915,7 @@ def fit_kernel(stamps, template, image, config, kernel_vecs, oversample=1, verbo
                 print(f"    stamp ({s.x},{s.y}) BAD sig; advance sscnt")
             _advance_stamp_group(
                 s, template, image, config, kernel_vecs, oversample,
-                ker_order, lr_nx, lr_ny,
+                ker_order, lr_nx, lr_ny, basis_lr_maps=basis_lr_maps,
             )
             need_refit = True
 
@@ -865,7 +943,7 @@ def fit_kernel(stamps, template, image, config, kernel_vecs, oversample=1, verbo
                         )
                     _advance_stamp_group(
                         s, template, image, config, kernel_vecs, oversample,
-                        ker_order, lr_nx, lr_ny,
+                        ker_order, lr_nx, lr_ny, basis_lr_maps=basis_lr_maps,
                     )
                     need_refit = True
 

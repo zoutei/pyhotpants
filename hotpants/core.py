@@ -231,10 +231,15 @@ class Hotpants:
                     "stamp_mode='connected_regions' requires a star_catalog."
                 )
 
-        self.results = {}
+        self.results = {"stage_timings": {}}
         # New master lists for substamp objects
         self.template_substamps: List[Substamp] = []
         self.image_substamps: List[Substamp] = []
+        # Cached pure-Python kernel bases / OS LR basis maps (shared FOM+fit+apply)
+        self._cached_kernel_basis = None
+        self._cached_kernel_basis_scale = None
+        self._cached_basis_lr_maps = None
+        self._fom_stamps_by_region: Dict[int, Any] = {}
 
         # Dynamically set thresholds if not provided (nan-aware for masked JWST/FITS data)
         if self.config.tuthresh is None:
@@ -367,6 +372,57 @@ class Hotpants:
             expected = (self.ny_lr, self.nx_lr)
         if arr.shape != expected:
             raise HotpantsError(f"{name} must have shape {expected}")
+
+    def _ensure_kernel_basis(self, scale: int):
+        """Return cached kernel basis list for the given oversample scale."""
+        scale = int(scale)
+        if self._cached_kernel_basis is not None and self._cached_kernel_basis_scale == scale:
+            return self._cached_kernel_basis
+        hr_rkernel = self.config.rkernel * scale
+        k_size = 2 * hr_rkernel + 1
+        # calculate_kernel_basis uses sigma_gauss as C-style coeffs in
+        # exp(-x^2 * coeff). Physical Gaussian width must grow with
+        # oversample F, so coeffs scale as 1/F^2 (NOT *F). Scaling by F
+        # made OS>=4 bases far too sharp and produced ring residuals.
+        if scale > 1:
+            scaled_sigmas = [s / (scale ** 2) for s in self.config.sigma_gauss]
+        else:
+            scaled_sigmas = list(self.config.sigma_gauss)
+        basis = pure.kernel.calculate_kernel_basis(
+            (k_size, k_size), scaled_sigmas, self.config.deg_fixe
+        )
+        self._cached_kernel_basis = basis
+        self._cached_kernel_basis_scale = scale
+        return basis
+
+    def _ensure_basis_lr_maps(self, template_hr, scale: int):
+        """
+        Precompute LR maps of template ⊛ each kernel basis (oversample>1 only).
+        SciPy FFT convolution + thread pool; result cached on the instance.
+        """
+        scale = int(scale)
+        if scale <= 1:
+            return None
+        if self._cached_basis_lr_maps is not None and self._cached_kernel_basis_scale == scale:
+            return self._cached_basis_lr_maps
+        import time as _time
+
+        t0 = _time.perf_counter()
+        basis = self._ensure_kernel_basis(scale)
+        from .pure.os_precompute import precompute_basis_lr_maps
+
+        maps = precompute_basis_lr_maps(template_hr, basis, scale)
+        self._cached_basis_lr_maps = maps
+        self.results.setdefault("stage_timings", {})["precompute_basis_lr"] = (
+            _time.perf_counter() - t0
+        )
+        if self.config.verbose >= 1:
+            print(
+                f"Precomputed OS={scale} LR basis maps {maps.shape} "
+                f"in {self.results['stage_timings']['precompute_basis_lr']:.2f}s",
+                flush=True,
+            )
+        return maps
 
     def find_stamps(self) -> Tuple[List[Substamp], List[Substamp]]:
         """
@@ -570,17 +626,16 @@ class Hotpants:
                     substamp.fit_results["i"] = {"fom": result["fom"], "chi2": result["chi2"]}
         else:
             # Pure Python Implementation
-            # 1. Generate Basis Vectors (Global Config)
-            scale = self.oversample
-            hr_rkernel = self.config.rkernel * scale
-            shape_hr = (2 * hr_rkernel + 1, 2 * hr_rkernel + 1)
-            scaled_sigmas = [s * scale for s in self.config.sigma_gauss]
+            # 1. Generate Basis Vectors (Global Config) — cached; OS>1 precomputes LR maps
+            import time as _time
 
-            basis_funcs = pure.kernel.calculate_kernel_basis(
-                shape_hr,
-                scaled_sigmas,
-                self.config.deg_fixe,
-            )
+            t_fom0 = _time.perf_counter()
+            scale = self.oversample
+            basis_funcs = self._ensure_kernel_basis(scale)
+            basis_lr = None
+            if scale > 1:
+                # Template→image direction uses HR template
+                basis_lr = self._ensure_basis_lr_maps(self.template_data, scale)
 
             def _fom_by_stamp_group(substamps, conv_img, ref_img, direction, oversample_param):
                 """
@@ -593,6 +648,7 @@ class Hotpants:
                 # Preserve discovery order within each group (first = sscnt 0)
                 reps = [groups[gid][0] for gid in sorted(groups.keys())]
                 region_map = self.results.get("region_map")
+                blr = basis_lr if oversample_param > 1 else None
                 fitted = pure.fitting.fit_stamps_locally(
                     reps,
                     conv_img,
@@ -603,6 +659,7 @@ class Hotpants:
                     region_map=region_map,
                     input_mask=self.results.get("input_mask_lr"),
                     noise_sq=self.results.get("combined_noise_sq_lr"),
+                    basis_lr_maps=blr,
                 )
                 fit_by_coord = {(int(s.x), int(s.y)): s for s in fitted}
                 # Also index by region_id for connected mode (centroid may shift)
@@ -611,13 +668,21 @@ class Hotpants:
                     for s in fitted
                     if getattr(s, "region_id", None) is not None
                 }
+                # Stash filled FOM stamps for iterative fit reuse (copy, not shared)
+                if region_map is not None:
+                    self._fom_stamps_by_region = {
+                        rid: s for rid, s in fit_by_region.items() if not s.ignore
+                    }
                 survivors = []
                 n_pass = 0
                 for gid in sorted(groups.keys()):
                     rep = groups[gid][0]
-                    stamp_res = fit_by_coord.get((int(rep.x), int(rep.y)))
-                    if stamp_res is None and getattr(rep, "region_id", None) is not None:
+                    # Prefer region_id: flux centroids can collide when rounded to int
+                    stamp_res = None
+                    if getattr(rep, "region_id", None) is not None:
                         stamp_res = fit_by_region.get(int(rep.region_id))
+                    if stamp_res is None:
+                        stamp_res = fit_by_coord.get((int(rep.x), int(rep.y)))
                     survived = bool(stamp_res is not None and not stamp_res.ignore)
                     if survived:
                         n_pass += 1
@@ -676,6 +741,8 @@ class Hotpants:
                     "i",
                     1,
                 )
+
+            self.results.setdefault("stage_timings", {})["fom"] = _time.perf_counter() - t_fom0
 
         # Select best direction
         if conv_direction == "b":
@@ -795,14 +862,15 @@ class Hotpants:
 
         else:
             # Pure Python — mirror C: stamp groups with sscnt advancement (check_again).
+            import time as _time
+
+            t_fit0 = _time.perf_counter()
             oversample_param = self.oversample if conv_direction == 't' else 1
 
-            scale = oversample_param
-            hr_rkernel = self.config.rkernel * scale
-            k_size = 2 * hr_rkernel + 1
-            scaled_sigmas = [s * scale for s in self.config.sigma_gauss]
-
-            basis_funcs = pure.kernel.calculate_kernel_basis((k_size, k_size), scaled_sigmas, self.config.deg_fixe)
+            basis_funcs = self._ensure_kernel_basis(oversample_param)
+            basis_lr = None
+            if oversample_param > 1 and conv_direction == "t":
+                basis_lr = self._ensure_basis_lr_maps(self.template_data, oversample_param)
 
             # Groups of FOM survivors (ordered like C fit_kernel stamps_for_fit)
             stamp_groups = []
@@ -830,6 +898,13 @@ class Hotpants:
                 noise_sq=self.results["combined_noise_sq_lr"],
                 mask=self.results["input_mask_lr"],
                 region_map=self.results.get("region_map"),
+                basis_lr_maps=basis_lr,
+                prefilled_by_region=self._fom_stamps_by_region
+                if self.results.get("region_map") is not None
+                else None,
+            )
+            self.results.setdefault("stage_timings", {})["iterative_fit"] = (
+                _time.perf_counter() - t_fit0
             )
 
             if kernel_sol is None:
@@ -939,32 +1014,25 @@ class Hotpants:
             convolved_image, output_mask, conv_noise_sq = self.ext.apply_kernel(self._c_state, image_to_convolve, self.results["kernel_solution"], noise_to_convolve_sq)
             bkg = self.ext.get_background_image(self._c_state, self.results["kernel_solution"])
         else:
-            # Pure Python Convolution
-            # 1. Calculate Basis Functions
-            oversample_param = self.oversample if self.results["conv_direction"] == 't' else 1
-            
-            # Scale Basis if needed
-            scale = oversample_param
-            hr_rkernel = self.config.rkernel * scale
-            k_size = 2 * hr_rkernel + 1
-            scaled_sigmas = [s * scale for s in self.config.sigma_gauss]
+            # Pure Python Convolution — reuse cached basis
+            import time as _time
 
-            basis_funcs = pure.kernel.calculate_kernel_basis((k_size, k_size), scaled_sigmas, self.config.deg_fixe)
-            
-            # Convert basis_funcs to 3D array for Numba
+            t_app0 = _time.perf_counter()
+            oversample_param = self.oversample if self.results["conv_direction"] == 't' else 1
+            basis_funcs = self._ensure_kernel_basis(oversample_param)
             basis_vecs = np.array(basis_funcs)
-            
-            # 3. Apply Kernel
+
             convolved_image, bkg, conv_noise_sq, output_mask_conv = pure.convolution.apply_kernel(
-                image_to_convolve, self.results["kernel_solution"], 
-                noise_to_convolve_sq, mask, 
+                image_to_convolve, self.results["kernel_solution"],
+                noise_to_convolve_sq, mask,
                 self.config, basis_vecs,
                 oversample=oversample_param
             )
-            
-            # Output mask from convolution needs to be merged with existing?
-            # Hotpants C logic: convolve returns modified mask.
+
             output_mask = output_mask_conv
+            self.results.setdefault("stage_timings", {})["apply_kernel"] = (
+                _time.perf_counter() - t_app0
+            )
 
         convolved_image += bkg
 
@@ -1189,12 +1257,26 @@ class Hotpants:
             `get_final_outputs`. This includes the final difference image,
             noise map, mask, and statistics.
         """
+        import time as _time
+
+        timings = self.results.setdefault("stage_timings", {})
+        t0 = _time.perf_counter()
         self.find_stamps()
+        timings["find_stamps"] = _time.perf_counter() - t0
+        t0 = _time.perf_counter()
         self.fit_and_select_direction()
+        timings["fit_and_select_direction"] = _time.perf_counter() - t0
+        t0 = _time.perf_counter()
         self.iterative_fit_and_clip()
+        timings["iterative_fit_and_clip"] = _time.perf_counter() - t0
+        t0 = _time.perf_counter()
         self.convolve_and_difference()
+        timings["convolve_and_difference"] = _time.perf_counter() - t0
         outputs = self.get_final_outputs()
         self.save_outputs()
+        if self.config.verbose >= 1 and timings:
+            parts = ", ".join(f"{k}={v:.2f}s" for k, v in sorted(timings.items()))
+            print(f"Stage timings: {parts}", flush=True)
         return outputs
 
     def visualize_kernel(self, at_coords: Tuple[int, int], size_factor: float = 2.0) -> np.ndarray:
@@ -1232,15 +1314,11 @@ class Hotpants:
         else:
             # Pure Python: scale kernel to HR when oversample>1 (template convolution).
             scale = self.oversample if self.results.get("conv_direction", "t") == "t" else 1
+            basis_funcs = self._ensure_kernel_basis(scale)
             hr_rkernel = self.config.rkernel * scale
             k_size = 2 * hr_rkernel + 1
             if not self.config.deg_fixe:
                 self.config.deg_fixe = [self.config.ko] * self.config.ngauss
-            scaled_sigmas = [s * scale for s in self.config.sigma_gauss]
-
-            basis_funcs = pure.kernel.calculate_kernel_basis(
-                (k_size, k_size), scaled_sigmas, self.config.deg_fixe,
-            )
             kernel_vecs = np.array(basis_funcs)
 
             x, y = at_coords  # LR science coordinates

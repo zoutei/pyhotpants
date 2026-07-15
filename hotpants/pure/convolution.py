@@ -235,7 +235,7 @@ def jit_get_background(kernel_sol, bg_order, n_comp_ker, ker_order, r_pix_x, r_p
 
     return background
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def jit_convolve_patch(image, kernel):
     """
     2D patch convolution matching alard.c xy_conv_stamp filter orientation.
