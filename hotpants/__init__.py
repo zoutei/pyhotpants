@@ -4,7 +4,7 @@ HOTPanTS Python Wrapper
 A Python interface for the HOTPanTS image differencing software.
 """
 
-from .core import Hotpants, HotpantsConfig, Substamp, SubstampStatus
+from .core import Hotpants, HotpantsConfig, HotpantsError, Substamp, SubstampStatus
 
 __version__ = "0.1.1"
 
