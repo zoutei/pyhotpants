@@ -5,14 +5,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Index &mdash; pyhotpants 0.1.0 documentation</title>
+  <title>Index &mdash; pyhotpants 0.1.2 documentation</title>
       <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
       <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
 
   
       <script src="_static/jquery.js?v=5d32c60e"></script>
       <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
-      <script src="_static/documentation_options.js?v=01f34227"></script>
+      <script src="_static/documentation_options.js?v=92734c54"></script>
       <script src="_static/doctools.js?v=fd6eb6e6"></script>
       <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="_static/js/theme.js"></script>
@@ -44,6 +44,7 @@
 <li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a></li>
 <li class="toctree-l1"><a class="reference internal" href="config.html">Configuration Reference</a></li>
 <li class="toctree-l1"><a class="reference internal" href="models.html">The Substamp Class</a></li>
+<li class="toctree-l1"><a class="reference internal" href="convolve.html">Standalone template convolution</a></li>
 </ul>
 
         </div>
@@ -77,6 +78,7 @@
  | <a href="#C"><strong>C</strong></a>
  | <a href="#D"><strong>D</strong></a>
  | <a href="#F"><strong>F</strong></a>
+ | <a href="#G"><strong>G</strong></a>
  | <a href="#H"><strong>H</strong></a>
  | <a href="#I"><strong>I</strong></a>
  | <a href="#K"><strong>K</strong></a>
@@ -109,12 +111,18 @@
 <h2 id="C">C</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="convolve.html#hotpants.convolve.KernelModel.config">config (hotpants.convolve.KernelModel attribute)</a>, <a href="convolve.html#id0">[1]</a>
+</li>
       <li><a href="config.html#hotpants.config.HotpantsConfig.conv_var">conv_var (hotpants.config.HotpantsConfig attribute)</a>
 </li>
-      <li><a href="config.html#hotpants.config.HotpantsConfig.convolved_image_file">convolved_image_file (hotpants.config.HotpantsConfig attribute)</a>
+      <li><a href="api.html#hotpants.core.Hotpants.convolve_and_difference">convolve_and_difference() (hotpants.core.Hotpants method)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="convolve.html#hotpants.convolve.convolve_template">convolve_template() (in module hotpants.convolve)</a>
+</li>
+      <li><a href="config.html#hotpants.config.HotpantsConfig.convolved_image_file">convolved_image_file (hotpants.config.HotpantsConfig attribute)</a>
+</li>
       <li><a href="models.html#hotpants.models.Substamp.convolved_model_global">convolved_model_global (hotpants.models.Substamp attribute)</a>
 </li>
       <li><a href="models.html#hotpants.models.Substamp.convolved_model_local">convolved_model_local (hotpants.models.Substamp attribute)</a>
@@ -137,10 +145,16 @@
 </li>
       <li><a href="config.html#hotpants.config.HotpantsConfig.fillval_noise">fillval_noise (hotpants.config.HotpantsConfig attribute)</a>
 </li>
+      <li><a href="api.html#hotpants.core.Hotpants.find_stamps">find_stamps() (hotpants.core.Hotpants method)</a>
+</li>
+      <li><a href="api.html#hotpants.core.Hotpants.fit_and_select_direction">fit_and_select_direction() (hotpants.core.Hotpants method)</a>
+</li>
       <li><a href="models.html#hotpants.models.Substamp.fit_results">fit_results (hotpants.models.Substamp attribute)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="convolve.html#hotpants.convolve.KernelModel.fit_shape">fit_shape (hotpants.convolve.KernelModel attribute)</a>, <a href="convolve.html#id1">[1]</a>
+</li>
       <li><a href="config.html#hotpants.config.HotpantsConfig.fitthresh">fitthresh (hotpants.config.HotpantsConfig attribute)</a>
 </li>
       <li><a href="config.html#hotpants.config.HotpantsConfig.fom">fom (hotpants.config.HotpantsConfig attribute)</a>
@@ -149,11 +163,43 @@
 </li>
       <li><a href="models.html#hotpants.models.SubstampStatus.FOUND">FOUND (hotpants.models.SubstampStatus attribute)</a>
 </li>
+      <li><a href="convolve.html#hotpants.convolve.KernelModel.from_hotpants">from_hotpants() (hotpants.convolve.KernelModel class method)</a>
+</li>
+  </ul></td>
+</tr></table>
+
+<h2 id="G">G</h2>
+<table style="width: 100%" class="indextable genindextable"><tr>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="api.html#hotpants.core.Hotpants.get_final_outputs">get_final_outputs() (hotpants.core.Hotpants method)</a>
+</li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="api.html#hotpants.core.Hotpants.get_substamp_details">get_substamp_details() (hotpants.core.Hotpants method)</a>
+</li>
   </ul></td>
 </tr></table>
 
 <h2 id="H">H</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="api.html#hotpants.core.Hotpants">Hotpants (class in hotpants.core)</a>
+</li>
+      <li>
+    hotpants.convolve
+
+      <ul>
+        <li><a href="convolve.html#module-hotpants.convolve">module</a>
+</li>
+      </ul></li>
+      <li>
+    hotpants.core
+
+      <ul>
+        <li><a href="api.html#module-hotpants.core">module</a>
+</li>
+      </ul></li>
+  </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
       <li>
     hotpants.models
@@ -162,9 +208,9 @@
         <li><a href="models.html#module-hotpants.models">module</a>
 </li>
       </ul></li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="config.html#hotpants.config.HotpantsConfig">HotpantsConfig (class in hotpants.config)</a>
+</li>
+      <li><a href="api.html#hotpants.core.HotpantsError">HotpantsError</a>
 </li>
   </ul></td>
 </tr></table>
@@ -186,6 +232,8 @@
 </li>
       <li><a href="config.html#hotpants.config.HotpantsConfig.irdnoise">irdnoise (hotpants.config.HotpantsConfig attribute)</a>
 </li>
+      <li><a href="api.html#hotpants.core.Hotpants.iterative_fit_and_clip">iterative_fit_and_clip() (hotpants.core.Hotpants method)</a>
+</li>
       <li><a href="config.html#hotpants.config.HotpantsConfig.iuktresh">iuktresh (hotpants.config.HotpantsConfig attribute)</a>
 </li>
       <li><a href="config.html#hotpants.config.HotpantsConfig.iuthresh">iuthresh (hotpants.config.HotpantsConfig attribute)</a>
@@ -196,12 +244,16 @@
 <h2 id="K">K</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="config.html#hotpants.config.HotpantsConfig.kf_spread_mask1">kf_spread_mask1 (hotpants.config.HotpantsConfig attribute)</a>
+      <li><a href="convolve.html#hotpants.convolve.KernelModel.kernel_solution">kernel_solution (hotpants.convolve.KernelModel attribute)</a>, <a href="convolve.html#id2">[1]</a>
 </li>
-      <li><a href="config.html#hotpants.config.HotpantsConfig.kfm">kfm (hotpants.config.HotpantsConfig attribute)</a>
+      <li><a href="convolve.html#hotpants.convolve.KernelModel">KernelModel (class in hotpants.convolve)</a>
+</li>
+      <li><a href="config.html#hotpants.config.HotpantsConfig.kf_spread_mask1">kf_spread_mask1 (hotpants.config.HotpantsConfig attribute)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="config.html#hotpants.config.HotpantsConfig.kfm">kfm (hotpants.config.HotpantsConfig attribute)</a>
+</li>
       <li><a href="config.html#hotpants.config.HotpantsConfig.ko">ko (hotpants.config.HotpantsConfig attribute)</a>
 </li>
       <li><a href="config.html#hotpants.config.HotpantsConfig.ks">ks (hotpants.config.HotpantsConfig attribute)</a>
@@ -222,12 +274,14 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="config.html#hotpants.config.HotpantsConfig.mask_image_file">mask_image_file (hotpants.config.HotpantsConfig attribute)</a>
 </li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li>
     module
 
       <ul>
+        <li><a href="convolve.html#module-hotpants.convolve">hotpants.convolve</a>
+</li>
+        <li><a href="api.html#module-hotpants.core">hotpants.core</a>
+</li>
         <li><a href="models.html#module-hotpants.models">hotpants.models</a>
 </li>
       </ul></li>
@@ -281,13 +335,15 @@
 </li>
       <li><a href="models.html#hotpants.models.SubstampStatus.REJECTED_ITERATIVE_FIT">REJECTED_ITERATIVE_FIT (hotpants.models.SubstampStatus attribute)</a>
 </li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="config.html#hotpants.config.HotpantsConfig.rescale_ok">rescale_ok (hotpants.config.HotpantsConfig attribute)</a>
 </li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="config.html#hotpants.config.HotpantsConfig.rkernel">rkernel (hotpants.config.HotpantsConfig attribute)</a>
 </li>
       <li><a href="config.html#hotpants.config.HotpantsConfig.rss">rss (hotpants.config.HotpantsConfig attribute)</a>
+</li>
+      <li><a href="api.html#hotpants.core.Hotpants.run_pipeline">run_pipeline() (hotpants.core.Hotpants method)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -295,16 +351,18 @@
 <h2 id="S">S</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="api.html#hotpants.core.Hotpants.save_outputs">save_outputs() (hotpants.core.Hotpants method)</a>
+</li>
       <li><a href="config.html#hotpants.config.HotpantsConfig.sigma_gauss">sigma_gauss (hotpants.config.HotpantsConfig attribute)</a>
 </li>
       <li><a href="config.html#hotpants.config.HotpantsConfig.sigma_image_file">sigma_image_file (hotpants.config.HotpantsConfig attribute)</a>
 </li>
       <li><a href="models.html#hotpants.models.Substamp.stamp_group_id">stamp_group_id (hotpants.models.Substamp attribute)</a>
 </li>
-      <li><a href="config.html#hotpants.config.HotpantsConfig.stamp_region_file">stamp_region_file (hotpants.config.HotpantsConfig attribute)</a>
-</li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="config.html#hotpants.config.HotpantsConfig.stamp_region_file">stamp_region_file (hotpants.config.HotpantsConfig attribute)</a>
+</li>
       <li><a href="config.html#hotpants.config.HotpantsConfig.stat_sig">stat_sig (hotpants.config.HotpantsConfig attribute)</a>
 </li>
       <li><a href="models.html#hotpants.models.Substamp.status">status (hotpants.models.Substamp attribute)</a>
@@ -356,6 +414,10 @@
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="config.html#hotpants.config.HotpantsConfig.verbose">verbose (hotpants.config.HotpantsConfig attribute)</a>
+</li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="api.html#hotpants.core.Hotpants.visualize_kernel">visualize_kernel() (hotpants.core.Hotpants method)</a>
 </li>
   </ul></td>
 </tr></table>
