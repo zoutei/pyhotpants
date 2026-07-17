@@ -33,6 +33,8 @@ solution) or run the whole pipeline with a single call.
     configuration, and results.
 - High performance. The core algorithms are executed by the original C code
     via a lightweight extension.
+- Standalone template convolution (0.1.2+). Reuse a saved kernel with
+    `KernelModel` / `convolve_template` without re-running the full pipeline.
 
 ## Installation
 
@@ -106,6 +108,24 @@ results = hp.run_pipeline()
 # Access the final difference image from the results dictionary
 diff_image = results['diff_image']
 ```
+
+### Reusing a saved kernel (standalone convolution)
+
+After a fit, you can apply the same kernel to a template of the same shape
+without stamp finding or refitting. This returns the raw spatial convolution
+only (no background polynomial):
+
+```python
+from hotpants import Hotpants, HotpantsConfig, KernelModel, convolve_template
+
+hp = Hotpants(template_image, science_image, config=HotpantsConfig(...))
+hp.run_pipeline()
+
+kernel = KernelModel.from_hotpants(hp)
+convolved = convolve_template(template_image, kernel)
+```
+
+See the Sphinx page *Standalone template convolution* for details.
 
 ## Configuration
 
