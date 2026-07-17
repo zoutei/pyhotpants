@@ -1,12 +1,17 @@
-.. pyhotpants documentation master file, created by
-   sphinx-quickstart on Mon Aug 25 17:19:36 2025.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+.. pyhotpants documentation master file
 
 pyhotpants documentation
 ========================
 
-Welcome to the pyhotpants documentation!
+**Version 0.1.2**
+
+``pyhotpants`` is a Python wrapper around A. Becker's HOTPANTS
+(High Order Transform of PSF And Template Subtraction) C code. It exposes the
+Alard & Lupton image-subtraction algorithm through a NumPy/Astropy-friendly API.
+
+This release adds standalone template convolution via ``KernelModel`` and
+``convolve_template`` (apply a saved kernel without re-running the full
+pipeline). The default ``Hotpants`` pipeline behavior is unchanged.
 
 .. toctree::
    :maxdepth: 2
@@ -15,3 +20,4 @@ Welcome to the pyhotpants documentation!
    api
    config
    models
+   convolve
