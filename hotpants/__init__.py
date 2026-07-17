@@ -7,7 +7,7 @@ A Python interface for the HOTPanTS image differencing software.
 from .core import Hotpants, HotpantsConfig, HotpantsError, Substamp, SubstampStatus
 from .convolve import KernelModel, convolve_template
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 
 # Make the main classes and functions available at package level
 __all__ = [
