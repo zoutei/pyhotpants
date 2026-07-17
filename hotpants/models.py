@@ -50,11 +50,19 @@ class Substamp:
             data, forming the design matrix for the least-squares fit.
     """
 
-    def __init__(self, substamp_id: int, stamp_group_id: int, x: int, y: int):
+    def __init__(
+        self,
+        substamp_id: int,
+        stamp_group_id: int,
+        x: int,
+        y: int,
+        region_id: Optional[int] = None,
+    ):
         self.id: int = substamp_id
         self.stamp_group_id: int = stamp_group_id
         self.x: int = int(round(x))
         self.y: int = int(round(y))
+        self.region_id: Optional[int] = region_id
         self.status: SubstampStatus = SubstampStatus.FOUND
         self.image_cutout: Optional[np.ndarray] = None
         self.template_cutout: Optional[np.ndarray] = None
