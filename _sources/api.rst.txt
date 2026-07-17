@@ -1,9 +1,10 @@
 API Reference
 =============
 
-This is the API reference for the ``hotpants`` module.
+Core pipeline
+-------------
 
-.. automodule:: hotpants.hotpants
+.. automodule:: hotpants.core
    :members:
    :undoc-members:
    :show-inheritance:

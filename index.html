@@ -6,14 +6,14 @@
   <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>pyhotpants documentation &mdash; pyhotpants 0.1.0 documentation</title>
+  <title>pyhotpants documentation &mdash; pyhotpants 0.1.2 documentation</title>
       <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
       <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
 
   
       <script src="_static/jquery.js?v=5d32c60e"></script>
       <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
-      <script src="_static/documentation_options.js?v=01f34227"></script>
+      <script src="_static/documentation_options.js?v=92734c54"></script>
       <script src="_static/doctools.js?v=fd6eb6e6"></script>
       <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="_static/js/theme.js"></script>
@@ -46,6 +46,7 @@
 <li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a></li>
 <li class="toctree-l1"><a class="reference internal" href="config.html">Configuration Reference</a></li>
 <li class="toctree-l1"><a class="reference internal" href="models.html">The Substamp Class</a></li>
+<li class="toctree-l1"><a class="reference internal" href="convolve.html">Standalone template convolution</a></li>
 </ul>
 
         </div>
@@ -74,11 +75,20 @@
              
   <section id="pyhotpants-documentation">
 <h1>pyhotpants documentation<a class="headerlink" href="#pyhotpants-documentation" title="Link to this heading"></a></h1>
-<p>Welcome to the pyhotpants documentation!</p>
+<p><strong>Version 0.1.2</strong></p>
+<p><code class="docutils literal notranslate"><span class="pre">pyhotpants</span></code> is a Python wrapper around A. Becker’s HOTPANTS
+(High Order Transform of PSF And Template Subtraction) C code. It exposes the
+Alard &amp; Lupton image-subtraction algorithm through a NumPy/Astropy-friendly API.</p>
+<p>This release adds standalone template convolution via <code class="docutils literal notranslate"><span class="pre">KernelModel</span></code> and
+<code class="docutils literal notranslate"><span class="pre">convolve_template</span></code> (apply a saved kernel without re-running the full
+pipeline). The default <code class="docutils literal notranslate"><span class="pre">Hotpants</span></code> pipeline behavior is unchanged.</p>
 <div class="toctree-wrapper compound">
 <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api.html#module-hotpants.core">Core pipeline</a></li>
+</ul>
+</li>
 <li class="toctree-l1"><a class="reference internal" href="config.html">Configuration Reference</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="config.html#hotpants.config.HotpantsConfig"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig</span></code></a></li>
 </ul>
@@ -86,6 +96,11 @@
 <li class="toctree-l1"><a class="reference internal" href="models.html">The Substamp Class</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="models.html#hotpants.models.Substamp"><code class="docutils literal notranslate"><span class="pre">Substamp</span></code></a></li>
 <li class="toctree-l2"><a class="reference internal" href="models.html#hotpants.models.SubstampStatus"><code class="docutils literal notranslate"><span class="pre">SubstampStatus</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="convolve.html">Standalone template convolution</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="convolve.html#quick-start">Quick start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="convolve.html#module-hotpants.convolve">API</a></li>
 </ul>
 </li>
 </ul>
