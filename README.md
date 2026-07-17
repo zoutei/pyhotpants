@@ -6,6 +6,8 @@
 
 This project is **not** affiliated with the original HOTPANTS project. It is currently under active development and may contain bugs or incomplete features. By using this software you acknowledge that the maintainers are not responsible for any damage, incorrect scientific results, or other issues that may arise from its use.
 
+**Branch / version note:** Stable installs from ``main`` track **0.1.x** (C extension default). This ``development`` branch is **0.2.0 staging**: opt-in pure Python backend, oversampled templates, and connected-region stamps. Prefer ``main`` for production until 0.2.0 is promoted.
+
 
 ## pyhotpants
 This project provides a modern, object-oriented Python wrapper for the
@@ -35,6 +37,9 @@ solution) or run the whole pipeline with a single call.
     via a lightweight extension.
 - Standalone template convolution (0.1.2+). Reuse a saved kernel with
     `KernelModel` / `convolve_template` without re-running the full pipeline.
+- Opt-in pure Python backend (0.2.0 staging). Set `use_c_extension=False` for
+    the Numba/NumPy path; required for `oversample>1` and
+    `stamp_mode="connected_regions"`.
 
 ## Installation
 

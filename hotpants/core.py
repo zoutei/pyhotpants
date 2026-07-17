@@ -38,7 +38,7 @@ def _get_ext():
     return hotpants_ext
 
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 
 
 class HotpantsError(Exception):
