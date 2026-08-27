@@ -176,7 +176,10 @@ static PyObject *py_make_input_mask(PyObject *self, PyObject *args)
         PyErr_SetString(PyExc_MemoryError, "Failed to create NumPy array from data");
         return NULL;
     }
-    Py_INCREF(mask_arr);
+    /* PyArray_SimpleNewFromData already returns a new reference that this
+     * bare `return mask_arr;` correctly hands off to the caller -- an extra
+     * Py_INCREF here pins a second, permanent reference that nothing ever
+     * releases, leaking this nx*ny buffer every call. */
     PyArray_ENABLEFLAGS((PyArrayObject *)mask_arr, NPY_ARRAY_OWNDATA);
 
     return mask_arr;
@@ -213,7 +216,7 @@ static PyObject *py_calculate_noise_image(PyObject *self, PyObject *args)
         PyErr_SetString(PyExc_MemoryError, "Failed to create NumPy array from data");
         return NULL;
     }
-    Py_INCREF(noise_arr);
+    /* Same spurious-extra-reference leak as py_make_input_mask above. */
     PyArray_ENABLEFLAGS((PyArrayObject *)noise_arr, NPY_ARRAY_OWNDATA);
 
     return noise_arr;
@@ -356,11 +359,20 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
             for (int j = 0; j < state->tStamps[i].nss; j++)
             {
                 PyObject *substamp_dict = PyDict_New();
-                PyDict_SetItemString(substamp_dict, "substamp_id", PyLong_FromLong(t_substamp_id++));
-                PyDict_SetItemString(substamp_dict, "stamp_group_id", PyLong_FromLong(i));
-                PyDict_SetItemString(substamp_dict, "x", PyLong_FromLong((long)state->tStamps[i].xss[j]));
-                PyDict_SetItemString(substamp_dict, "y", PyLong_FromLong((long)state->tStamps[i].yss[j]));
+                PyObject *sid = PyLong_FromLong(t_substamp_id++);
+                PyObject *gid = PyLong_FromLong(i);
+                PyObject *xo = PyLong_FromLong((long)state->tStamps[i].xss[j]);
+                PyObject *yo = PyLong_FromLong((long)state->tStamps[i].yss[j]);
+                PyDict_SetItemString(substamp_dict, "substamp_id", sid);
+                PyDict_SetItemString(substamp_dict, "stamp_group_id", gid);
+                PyDict_SetItemString(substamp_dict, "x", xo);
+                PyDict_SetItemString(substamp_dict, "y", yo);
+                Py_DECREF(sid);
+                Py_DECREF(gid);
+                Py_DECREF(xo);
+                Py_DECREF(yo);
                 PyList_Append(t_substamps_list, substamp_dict);
+                Py_DECREF(substamp_dict);
             }
         }
     }
@@ -372,16 +384,32 @@ static PyObject *py_find_stamps(PyObject *self, PyObject *args)
             for (int j = 0; j < state->iStamps[i].nss; j++)
             {
                 PyObject *substamp_dict = PyDict_New();
-                PyDict_SetItemString(substamp_dict, "substamp_id", PyLong_FromLong(i_substamp_id++));
-                PyDict_SetItemString(substamp_dict, "stamp_group_id", PyLong_FromLong(i));
-                PyDict_SetItemString(substamp_dict, "x", PyLong_FromLong((long)state->iStamps[i].xss[j]));
-                PyDict_SetItemString(substamp_dict, "y", PyLong_FromLong((long)state->iStamps[i].yss[j]));
+                PyObject *sid = PyLong_FromLong(i_substamp_id++);
+                PyObject *gid = PyLong_FromLong(i);
+                PyObject *xo = PyLong_FromLong((long)state->iStamps[i].xss[j]);
+                PyObject *yo = PyLong_FromLong((long)state->iStamps[i].yss[j]);
+                PyDict_SetItemString(substamp_dict, "substamp_id", sid);
+                PyDict_SetItemString(substamp_dict, "stamp_group_id", gid);
+                PyDict_SetItemString(substamp_dict, "x", xo);
+                PyDict_SetItemString(substamp_dict, "y", yo);
+                Py_DECREF(sid);
+                Py_DECREF(gid);
+                Py_DECREF(xo);
+                Py_DECREF(yo);
                 PyList_Append(i_substamps_list, substamp_dict);
+                Py_DECREF(substamp_dict);
             }
         }
     }
 
-    return Py_BuildValue("OO", t_substamps_list, i_substamps_list);
+    /* Py_BuildValue's "O" format increfs each object into the tuple slot
+     * without stealing the local reference; since these lists were just
+     * created here (PyList_New(0)) and are never used again, the original
+     * creation reference must be dropped explicitly or it's never released. */
+    PyObject *substamps_result = Py_BuildValue("OO", t_substamps_list, i_substamps_list);
+    Py_DECREF(t_substamps_list);
+    Py_DECREF(i_substamps_list);
+    return substamps_result;
 }
 
 static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
@@ -473,7 +501,17 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
         fillStamp(state, &all_stamps[group_id], (float *)PyArray_DATA(conv_arr), (float *)PyArray_DATA(ref_arr));
 
         PyObject *result_dict = PyDict_New();
-        PyDict_SetItemString(result_dict, "substamp_id", PyLong_FromLong(substamp_id));
+        {
+            /* PyDict_SetItemString increfs its own copy of the value; it
+             * never steals the reference PyLong_FromLong/PyArray_SimpleNewFromData
+             * just handed us, so every value stored below must be explicitly
+             * decref'd afterward or its buffer is never freed. This loop runs
+             * once per substamp (up to thousands per frame), so this was a
+             * substantial leak. */
+            PyObject *substamp_id_obj = PyLong_FromLong(substamp_id);
+            PyDict_SetItemString(result_dict, "substamp_id", substamp_id_obj);
+            Py_DECREF(substamp_id_obj);
+        }
 
         // Extract convolved and reference cutouts
         int cutout_size = state->fwKSStamp * state->fwKSStamp;
@@ -506,6 +544,11 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
         PyDict_SetItemString(result_dict, "image_cutout", (strcmp(conv_dir, "t") == 0) ? ref_cutout_arr : conv_cutout_arr);
         PyDict_SetItemString(result_dict, "template_cutout", (strcmp(conv_dir, "t") == 0) ? conv_cutout_arr : ref_cutout_arr);
         PyDict_SetItemString(result_dict, "noise_cutout", noise_cutout_arr);
+        /* Each of these three arrays is stored under exactly one of the two
+         * keys above (conv_dir picks which), so exactly one decref each. */
+        Py_DECREF(conv_cutout_arr);
+        Py_DECREF(ref_cutout_arr);
+        Py_DECREF(noise_cutout_arr);
 
         double *basis_vectors_data = (double *)malloc(n_basis_vectors * state->fwKSStamp * state->fwKSStamp * sizeof(double));
         for (int v = 0; v < n_basis_vectors; v++)
@@ -517,6 +560,7 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
         PyObject *basis_vectors_arr = PyArray_SimpleNewFromData(3, basis_dims, NPY_DOUBLE, basis_vectors_data);
         PyArray_ENABLEFLAGS((PyArrayObject *)basis_vectors_arr, NPY_ARRAY_OWNDATA);
         PyDict_SetItemString(result_dict, "basis_vectors", basis_vectors_arr);
+        Py_DECREF(basis_vectors_arr);
 
         // --- Perform local fit and generate local model ---
         int n_local_comps = state->nCompKer + 1;
@@ -552,6 +596,7 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
         PyObject *local_sol_arr = PyArray_SimpleNewFromData(1, local_sol_dims, NPY_DOUBLE, local_sol_py);
         PyArray_ENABLEFLAGS((PyArrayObject *)local_sol_arr, NPY_ARRAY_OWNDATA);
         PyDict_SetItemString(result_dict, "local_solution", local_sol_arr);
+        Py_DECREF(local_sol_arr);
 
         // Generate the local convolved model using the local solution
         float *local_model_data = (float *)calloc(state->fwKSStamp * state->fwKSStamp, sizeof(float));
@@ -566,6 +611,7 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
         PyObject *local_model_arr = PyArray_SimpleNewFromData(2, cutout_dims, NPY_FLOAT32, local_model_data);
         PyArray_ENABLEFLAGS((PyArrayObject *)local_model_arr, NPY_ARRAY_OWNDATA);
         PyDict_SetItemString(result_dict, "convolved_model_local", local_model_arr);
+        Py_DECREF(local_model_arr);
 
         // Clean up temporary memory for local fit
         for (int m = 0; m <= n_local_comps; m++)
@@ -575,7 +621,10 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
         free(local_mat);
         free(local_sol_data);
 
+        /* PyList_Append increfs its own copy too; drop this function's
+         * original PyDict_New() reference now that the list holds one. */
         PyList_Append(fit_results_list, result_dict);
+        Py_DECREF(result_dict);
     }
 
     // --- Fitting Stage ---
@@ -588,8 +637,14 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
         PyObject *substamp_coord_dict = PyList_GetItem(substamps_coord_list, i);
         int group_id = PyLong_AsLong(PyDict_GetItemString(substamp_coord_dict, "stamp_group_id"));
 
-        PyDict_SetItemString(result_dict, "fom", PyFloat_FromDouble(all_stamps[group_id].diff));
-        PyDict_SetItemString(result_dict, "chi2", PyFloat_FromDouble(all_stamps[group_id].chi2));
+        {
+            PyObject *fom_obj = PyFloat_FromDouble(all_stamps[group_id].diff);
+            PyObject *chi2_obj = PyFloat_FromDouble(all_stamps[group_id].chi2);
+            PyDict_SetItemString(result_dict, "fom", fom_obj);
+            PyDict_SetItemString(result_dict, "chi2", chi2_obj);
+            Py_DECREF(fom_obj);
+            Py_DECREF(chi2_obj);
+        }
         {
             PyObject *survived = (all_stamps[group_id].diff < state->kerSigReject) ? Py_True : Py_False;
             Py_INCREF(survived);
@@ -600,7 +655,12 @@ static PyObject *py_fit_stamps_and_get_fom(PyObject *self, PyObject *args)
 
     freeStampMem(state, all_stamps, n_stamps);
     free(all_stamps);
-    return Py_BuildValue("dO", fom, fit_results_list);
+    /* fit_results_list was created fresh above (PyList_New(0)); Py_BuildValue's
+     * "O" increfs it into the tuple without stealing the original reference,
+     * so it must be dropped here or the whole per-substamp dict tree leaks. */
+    PyObject *fom_result = Py_BuildValue("dO", fom, fit_results_list);
+    Py_DECREF(fit_results_list);
+    return fom_result;
 }
 
 static PyObject *py_fit_kernel(PyObject *self, PyObject *args)
@@ -681,20 +741,37 @@ static PyObject *py_fit_kernel(PyObject *self, PyObject *args)
     {
         if (stamps[i].sscnt < stamps[i].nss)
         {
-            PyList_Append(final_survivor_indices, PyLong_FromLong(i));
+            PyObject *idx_obj = PyLong_FromLong(i);
+            PyList_Append(final_survivor_indices, idx_obj);
+            Py_DECREF(idx_obj);
         }
     }
 
     PyObject *stats_dict = PyDict_New();
-    PyDict_SetItemString(stats_dict, "meansig", PyFloat_FromDouble(meansig_substamps));
-    PyDict_SetItemString(stats_dict, "scatter", PyFloat_FromDouble(scatter_substamps));
-    PyDict_SetItemString(stats_dict, "nskipped", PyLong_FromLong(n_skipped_substamps));
+    {
+        PyObject *meansig_obj = PyFloat_FromDouble(meansig_substamps);
+        PyObject *scatter_obj = PyFloat_FromDouble(scatter_substamps);
+        PyObject *nskipped_obj = PyLong_FromLong(n_skipped_substamps);
+        PyDict_SetItemString(stats_dict, "meansig", meansig_obj);
+        PyDict_SetItemString(stats_dict, "scatter", scatter_obj);
+        PyDict_SetItemString(stats_dict, "nskipped", nskipped_obj);
+        Py_DECREF(meansig_obj);
+        Py_DECREF(scatter_obj);
+        Py_DECREF(nskipped_obj);
+    }
 
     freeStampMem(state, stamps, n_stamps);
     free(stamps);
     free(kernel_sol);
 
-    return Py_BuildValue("OOO", global_coeffs_array, stats_dict, final_survivor_indices);
+    /* Same leak pattern as py_find_stamps/py_fit_stamps_and_get_fom above:
+     * these three were created fresh in this function and Py_BuildValue's
+     * "O" format does not steal their references. */
+    PyObject *fit_kernel_result = Py_BuildValue("OOO", global_coeffs_array, stats_dict, final_survivor_indices);
+    Py_DECREF(global_coeffs_array);
+    Py_DECREF(stats_dict);
+    Py_DECREF(final_survivor_indices);
+    return fit_kernel_result;
 }
 
 static PyObject *py_apply_kernel(PyObject *self, PyObject *args)
@@ -784,15 +861,22 @@ static PyObject *py_apply_kernel(PyObject *self, PyObject *args)
         return NULL;
     }
 
-    Py_INCREF(conv_arr);
-    Py_INCREF(mask_arr);
-    Py_INCREF(conv_noise_sq_arr);
-
     PyArray_ENABLEFLAGS((PyArrayObject *)conv_arr, NPY_ARRAY_OWNDATA);
     PyArray_ENABLEFLAGS((PyArrayObject *)mask_arr, NPY_ARRAY_OWNDATA);
     PyArray_ENABLEFLAGS((PyArrayObject *)conv_noise_sq_arr, NPY_ARRAY_OWNDATA);
 
-    return Py_BuildValue("OOO", conv_arr, mask_arr, conv_noise_sq_arr);
+    /* This is the dominant per-frame leak: three erroneous Py_INCREF calls
+     * used to sit here on top of Py_BuildValue's own "O"-format increfs,
+     * permanently pinning conv_arr/mask_arr/conv_noise_sq_arr (each a full
+     * nx*ny image buffer) so they were never freed. Even without those
+     * extra increfs, Py_BuildValue("O", ...) does not steal the reference
+     * these three already own from PyArray_SimpleNewFromData, so the
+     * original creation reference must still be dropped explicitly. */
+    PyObject *apply_kernel_result = Py_BuildValue("OOO", conv_arr, mask_arr, conv_noise_sq_arr);
+    Py_DECREF(conv_arr);
+    Py_DECREF(mask_arr);
+    Py_DECREF(conv_noise_sq_arr);
+    return apply_kernel_result;
 }
 
 static PyObject *py_get_background_image(PyObject *self, PyObject *args)
@@ -828,8 +912,6 @@ static PyObject *py_get_background_image(PyObject *self, PyObject *args)
         PyErr_SetString(PyExc_MemoryError, "Failed to create NumPy array from data");
         return NULL;
     }
-    Py_INCREF(bkg_arr);
-
     PyArray_ENABLEFLAGS((PyArrayObject *)bkg_arr, NPY_ARRAY_OWNDATA);
 
     return bkg_arr;
@@ -886,7 +968,6 @@ static PyObject *py_rescale_noise_ok(PyObject *self, PyObject *args)
         PyErr_SetString(PyExc_MemoryError, "Failed to create NumPy array from data");
         return NULL;
     }
-    Py_INCREF(new_noise_arr);
     PyArray_ENABLEFLAGS((PyArrayObject *)new_noise_arr, NPY_ARRAY_OWNDATA);
 
     return new_noise_arr;
@@ -924,11 +1005,23 @@ static PyObject *py_calculate_final_stats(PyObject *self, PyObject *args)
     getNoiseStats3(&local_state, diff_data, noise_data, &x2norm, &nx2norm, 0x0, 0xffff);
 
     PyObject *stats_dict = PyDict_New();
-    PyDict_SetItemString(stats_dict, "diff_mean", PyFloat_FromDouble(mean));
-    PyDict_SetItemString(stats_dict, "diff_std", PyFloat_FromDouble(sd));
-    PyDict_SetItemString(stats_dict, "noise_mean", PyFloat_FromDouble(nmean));
-    PyDict_SetItemString(stats_dict, "x2norm", PyFloat_FromDouble(x2norm));
-    PyDict_SetItemString(stats_dict, "nx2norm", PyLong_FromLong(nx2norm));
+    {
+        PyObject *diff_mean_obj = PyFloat_FromDouble(mean);
+        PyObject *diff_std_obj = PyFloat_FromDouble(sd);
+        PyObject *noise_mean_obj = PyFloat_FromDouble(nmean);
+        PyObject *x2norm_obj = PyFloat_FromDouble(x2norm);
+        PyObject *nx2norm_obj = PyLong_FromLong(nx2norm);
+        PyDict_SetItemString(stats_dict, "diff_mean", diff_mean_obj);
+        PyDict_SetItemString(stats_dict, "diff_std", diff_std_obj);
+        PyDict_SetItemString(stats_dict, "noise_mean", noise_mean_obj);
+        PyDict_SetItemString(stats_dict, "x2norm", x2norm_obj);
+        PyDict_SetItemString(stats_dict, "nx2norm", nx2norm_obj);
+        Py_DECREF(diff_mean_obj);
+        Py_DECREF(diff_std_obj);
+        Py_DECREF(noise_mean_obj);
+        Py_DECREF(x2norm_obj);
+        Py_DECREF(nx2norm_obj);
+    }
     return stats_dict;
 }
 
@@ -1374,7 +1467,10 @@ static void free_hotpants_state(HotpantsStateObject *self)
         }
         if (state->PCA)
         {
-            for (int i = 0; i < state->ngauss; ++i)
+            /* allocated with nCompKer entries (hotpants_state_init_from_config),
+             * not ngauss -- freeing fewer than that under-frees whenever
+             * nCompKer > ngauss (i.e. deg_fixe > 0 for any gaussian). */
+            for (int i = 0; i < state->nCompKer; ++i)
                 if (state->PCA[i])
                     free(state->PCA[i]);
             free(state->PCA);
