@@ -30,6 +30,17 @@ void getKernelVec(hotpants_state_t *state) {
     for (ig = 0; ig < state->ngauss; ig++) {
         for (idegx = 0; idegx <= state->deg_fixe[ig]; idegx++) {
             for (idegy = 0; idegy <= state->deg_fixe[ig]-idegx; idegy++) {
+                /* getKernelVec is called multiple times per state object
+                 * (once from py_fit_stamps_and_get_fom, again from
+                 * fitKernel's iterative_fit_and_clip, again from
+                 * py_apply_kernel) despite the "called only once" comment
+                 * above -- free the previous entry before overwriting it,
+                 * or every call after the first orphans a malloc'd
+                 * fwKernel*fwKernel buffer. */
+                if (state->kernel_vec[nvec] != NULL) {
+                    free(state->kernel_vec[nvec]);
+                    state->kernel_vec[nvec] = NULL;
+                }
                 /* stores kernel weight mask for each order */
                 state->kernel_vec[nvec] = kernel_vector(state, nvec, idegx, idegy, ig, &ren);
                 nvec++;
