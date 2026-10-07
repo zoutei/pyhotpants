@@ -1,0 +1,152 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Compatibility and migration &mdash; pyhotpants 0.2.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=938c9ccc"></script>
+      <script src="_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Backends (C extension vs pure Python)" href="backends.html" />
+    <link rel="prev" title="pyhotpants documentation" href="index.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            pyhotpants
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Compatibility and migration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#supported-compatibility-contract-0-2-0-staging">Supported compatibility contract (0.2.0 staging)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#what-is-new-in-0-2-0-staging-on-development">What is new in 0.2.0 (staging on <code class="docutils literal notranslate"><span class="pre">development</span></code>)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#migration-tips">Migration tips</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="backends.html">Backends (C extension vs pure Python)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="parity.html">C vs pure Python parity policy</a></li>
+<li class="toctree-l1"><a class="reference internal" href="connected_stamps.html">Connected-region stamps</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="config.html">Configuration Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="models.html">The Substamp Class</a></li>
+<li class="toctree-l1"><a class="reference internal" href="convolve.html">Standalone template convolution</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">pyhotpants</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Compatibility and migration</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/compatibility.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="compatibility-and-migration">
+<span id="compatibility"></span><h1>Compatibility and migration<a class="headerlink" href="#compatibility-and-migration" title="Link to this heading"></a></h1>
+<section id="supported-compatibility-contract-0-2-0-staging">
+<h2>Supported compatibility contract (0.2.0 staging)<a class="headerlink" href="#supported-compatibility-contract-0-2-0-staging" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p>Scripts written against <strong>0.1.x</strong> that construct <code class="docutils literal notranslate"><span class="pre">Hotpants</span></code> / <code class="docutils literal notranslate"><span class="pre">HotpantsConfig</span></code>
+without new keyword arguments continue to work.</p></li>
+<li><p>Default backend remains the <strong>C extension</strong> (<code class="docutils literal notranslate"><span class="pre">use_c_extension=True</span></code>).</p></li>
+<li><p>Default stamp selection remains classic <code class="docutils literal notranslate"><span class="pre">stamp_mode=&quot;grid&quot;</span></code>.</p></li>
+<li><p>Public exports from 0.1.2 (<code class="docutils literal notranslate"><span class="pre">KernelModel</span></code>, <code class="docutils literal notranslate"><span class="pre">convolve_template</span></code>) remain available.</p></li>
+<li><p>Return products from <code class="docutils literal notranslate"><span class="pre">run_pipeline()</span></code> / <code class="docutils literal notranslate"><span class="pre">get_final_outputs()</span></code> keep the
+established keys (difference image, convolved image, background, noise,
+mask, stats, kernel solution, convolution direction).</p></li>
+</ul>
+</section>
+<section id="what-is-new-in-0-2-0-staging-on-development">
+<h2>What is new in 0.2.0 (staging on <code class="docutils literal notranslate"><span class="pre">development</span></code>)<a class="headerlink" href="#what-is-new-in-0-2-0-staging-on-development" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p>Pure Python backend via <code class="docutils literal notranslate"><span class="pre">use_c_extension=False</span></code></p></li>
+<li><p>Oversampled templates via <code class="docutils literal notranslate"><span class="pre">oversample</span> <span class="pre">&gt;</span> <span class="pre">1</span></code></p></li>
+<li><p>Connected-region stamps via <code class="docutils literal notranslate"><span class="pre">stamp_mode=&quot;connected_regions&quot;</span></code></p></li>
+<li><p>Expanded documentation for backends, parity, and connected stamps</p></li>
+</ul>
+</section>
+<section id="migration-tips">
+<h2>Migration tips<a class="headerlink" href="#migration-tips" title="Link to this heading"></a></h2>
+<ol class="arabic simple">
+<li><p>Keep production pipelines on the C default until you have validated pure
+Python on your data (see <a class="reference internal" href="parity.html#parity-policy"><span class="std std-ref">C vs pure Python parity policy</span></a>).</p></li>
+<li><p>Opt into new modes explicitly; do not rely on changed defaults.</p></li>
+<li><p>When comparing C vs pure, pin the same <code class="docutils literal notranslate"><span class="pre">HotpantsConfig</span></code> and inputs.</p></li>
+</ol>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="index.html" class="btn btn-neutral float-left" title="pyhotpants documentation" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="backends.html" class="btn btn-neutral float-right" title="Backends (C extension vs pure Python)" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Koji.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

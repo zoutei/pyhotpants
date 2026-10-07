@@ -6,14 +6,14 @@
   <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Configuration Reference &mdash; pyhotpants 0.1.2 documentation</title>
+  <title>Configuration Reference &mdash; pyhotpants 0.2.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
       <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
 
   
       <script src="_static/jquery.js?v=5d32c60e"></script>
       <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
-      <script src="_static/documentation_options.js?v=92734c54"></script>
+      <script src="_static/documentation_options.js?v=938c9ccc"></script>
       <script src="_static/doctools.js?v=fd6eb6e6"></script>
       <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="_static/js/theme.js"></script>
@@ -44,6 +44,10 @@
         </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
               <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
 <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="compatibility.html">Compatibility and migration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backends.html">Backends (C extension vs pure Python)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="parity.html">C vs pure Python parity policy</a></li>
+<li class="toctree-l1"><a class="reference internal" href="connected_stamps.html">Connected-region stamps</a></li>
 <li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Configuration Reference</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="#hotpants.config.HotpantsConfig"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig</span></code></a><ul>
@@ -86,6 +90,11 @@
 <li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.convolved_image_file"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.convolved_image_file</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.sigma_image_file"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.sigma_image_file</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.stamp_region_file"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.stamp_region_file</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.stamp_mode"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.stamp_mode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.region_max_diameter"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.region_max_diameter</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.region_weight"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.region_weight</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.region_min_npix"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.region_min_npix</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.region_bisect_on_reject"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.region_bisect_on_reject</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.ngauss"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.ngauss</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.deg_fixe"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.deg_fixe</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="#hotpants.config.HotpantsConfig.sigma_gauss"><code class="docutils literal notranslate"><span class="pre">HotpantsConfig.sigma_gauss</span></code></a></li>
@@ -566,6 +575,76 @@ pre-configured instance can also be passed during initialization.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Type<span class="colon">:</span></dt>
 <dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">Connected-region</span> <span class="pre">stamps</span></span></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>pure Python only</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">------------------------------------------</span></span></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.stamp_mode">
+<span class="sig-name descname"><span class="pre">stamp_mode</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.stamp_mode" title="Link to this definition"></a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">&quot;grid&quot;</span></code> (classic) or <code class="docutils literal notranslate"><span class="pre">&quot;connected_regions&quot;</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.region_max_diameter">
+<span class="sig-name descname"><span class="pre">region_max_diameter</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.region_max_diameter" title="Link to this definition"></a></dt>
+<dd><p>Split islands larger than this bbox span (px).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.region_weight">
+<span class="sig-name descname"><span class="pre">region_weight</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.region_weight" title="Link to this definition"></a></dt>
+<dd><p>Equation weight <code class="docutils literal notranslate"><span class="pre">uniform</span></code> / <code class="docutils literal notranslate"><span class="pre">npix</span></code> / <code class="docutils literal notranslate"><span class="pre">flux</span></code> / <code class="docutils literal notranslate"><span class="pre">invvar</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.region_min_npix">
+<span class="sig-name descname"><span class="pre">region_min_npix</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.region_min_npix" title="Link to this definition"></a></dt>
+<dd><p>Floor on good pixels after exclusion; <code class="docutils literal notranslate"><span class="pre">None</span></code> → one paint box.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int|None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="hotpants.config.HotpantsConfig.region_bisect_on_reject">
+<span class="sig-name descname"><span class="pre">region_bisect_on_reject</span></span><a class="headerlink" href="#hotpants.config.HotpantsConfig.region_bisect_on_reject" title="Link to this definition"></a></dt>
+<dd><p>Split region if star exclusion leaves it too small.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
 </dd>
 </dl>
 </dd></dl>

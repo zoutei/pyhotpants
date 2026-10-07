@@ -1,0 +1,165 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>C vs pure Python parity policy &mdash; pyhotpants 0.2.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=938c9ccc"></script>
+      <script src="_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Connected-region stamps" href="connected_stamps.html" />
+    <link rel="prev" title="Backends (C extension vs pure Python)" href="backends.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            pyhotpants
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="compatibility.html">Compatibility and migration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backends.html">Backends (C extension vs pure Python)</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">C vs pure Python parity policy</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#in-scope">In scope</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#compared-products-minimum">Compared products (minimum)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#out-of-scope-no-c-twin">Out of scope (no C twin)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#how-we-test">How we test</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="connected_stamps.html">Connected-region stamps</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="config.html">Configuration Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="models.html">The Substamp Class</a></li>
+<li class="toctree-l1"><a class="reference internal" href="convolve.html">Standalone template convolution</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">pyhotpants</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">C vs pure Python parity policy</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/parity.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="c-vs-pure-python-parity-policy">
+<span id="parity-policy"></span><h1>C vs pure Python parity policy<a class="headerlink" href="#c-vs-pure-python-parity-policy" title="Link to this heading"></a></h1>
+<p>For classic configurations the pure Python backend aims to reproduce the C
+extension results on the same inputs.</p>
+<section id="in-scope">
+<h2>In scope<a class="headerlink" href="#in-scope" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">use_c_extension=False</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">oversample=1</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">stamp_mode=&quot;grid&quot;</span></code> (classic substamps)</p></li>
+</ul>
+</section>
+<section id="compared-products-minimum">
+<h2>Compared products (minimum)<a class="headerlink" href="#compared-products-minimum" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p>Difference image</p></li>
+<li><p>Convolved image / background (as returned by the public API)</p></li>
+<li><p>Kernel solution vector</p></li>
+<li><p>Output mask (exact or documented bit policy)</p></li>
+<li><p>Noise map when part of the returned products</p></li>
+</ul>
+<p>Tolerances should start strict (float32 <code class="docutils literal notranslate"><span class="pre">atol</span></code> / <code class="docutils literal notranslate"><span class="pre">rtol</span></code> as appropriate) and
+only be widened with a written justification per product.</p>
+</section>
+<section id="out-of-scope-no-c-twin">
+<h2>Out of scope (no C twin)<a class="headerlink" href="#out-of-scope-no-c-twin" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">oversample</span> <span class="pre">&gt;</span> <span class="pre">1</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">stamp_mode=&quot;connected_regions&quot;</span></code></p></li>
+</ul>
+<p>These modes are validated with their own unit tests and real-data soak runs,
+not by bit-matching the C grid path.</p>
+</section>
+<section id="how-we-test">
+<h2>How we test<a class="headerlink" href="#how-we-test" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p>Synthetic / unit tests under <code class="docutils literal notranslate"><span class="pre">tests/</span></code> (e.g. connected-region builders)</p></li>
+<li><p>Real-data comparisons (JWST JADES example data under <code class="docutils literal notranslate"><span class="pre">example/data/</span></code> and
+developer notebooks such as <code class="docutils literal notranslate"><span class="pre">dev/compare_c_vs_pure_jwst.ipynb</span></code>)</p></li>
+<li><p>A curated fixture pack with C golden outputs is planned before promoting
+0.2.0 from <code class="docutils literal notranslate"><span class="pre">development</span></code> to <code class="docutils literal notranslate"><span class="pre">main</span></code></p></li>
+</ul>
+<p>Until that fixture harness lands, treat 0.2.0 on <code class="docutils literal notranslate"><span class="pre">development</span></code> as <strong>staging</strong>:
+suitable for further testing, not yet the default install target.</p>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="backends.html" class="btn btn-neutral float-left" title="Backends (C extension vs pure Python)" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="connected_stamps.html" class="btn btn-neutral float-right" title="Connected-region stamps" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Koji.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
