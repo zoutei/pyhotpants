@@ -8,3 +8,7 @@ __pycache__/
 *.so
 .DS_Store
 dev/_development_worktree/
+
+# local build dir and outputs written by the JWST example notebook
+build/
+example/jwst_*.fits
