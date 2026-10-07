@@ -362,11 +362,11 @@ def gate_catalog_stars_for_regions(
     fitthresh: float = 5.0,
 ) -> np.ndarray:
     """
-    Phase-0-style gate: border + rss box free of FLAG_INPUT_ISBAD
-    and finite pixels. Optional ukthresh rejects saturated boxes.
+    Phase-0-style gate: border + rss box free of FLAG_REGION_EXCLUDE (bad data and the
+    caller's input mask) and finite pixels. Optional ukthresh rejects saturated boxes.
     Returns (N,2) 0-based survivors.
     """
-    from .utils import FLAG_INPUT_ISBAD
+    from .utils import FLAG_REGION_EXCLUDE
 
     del fitthresh  # reserved for future PSF-style soft gate
     xy = np.asarray(catalog_xy, dtype=np.float64)
@@ -374,7 +374,7 @@ def gate_catalog_stars_for_regions(
         return np.zeros((0, 2), dtype=np.float64)
     ny, nx = image.shape
     border = int(rkernel) + int(rss) + 1
-    bad_bits = FLAG_INPUT_ISBAD
+    bad_bits = FLAG_REGION_EXCLUDE
     keep = []
     for x, y in xy:
         xi, yi = int(round(x)), int(round(y))

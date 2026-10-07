@@ -197,6 +197,11 @@ FLAG_I_BAD = 0x400
 FLAG_T_SKIP = 0x200
 FLAG_I_SKIP = 0x800
 
+# Pixels the connected-regions path must keep out of region gates, region fits and region clipping: bad data
+# (FLAG_INPUT_ISBAD) and the caller's own t_mask / i_mask (FLAG_INPUT_MASK, set by make_input_mask). The grid stamp
+# finders already reject FLAG_INPUT_MASK through their `& 0xBF` test; before this the region path ignored it.
+FLAG_REGION_EXCLUDE = FLAG_INPUT_ISBAD | FLAG_INPUT_MASK
+
 
 def mask_pixels(image, low_thresh=None, high_thresh=None, bitmask=None):
     """

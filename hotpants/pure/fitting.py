@@ -206,7 +206,7 @@ def populate_region_vectors(
     precomputed LR basis maps (JAX path) instead of per-region HR convolution.
     """
     from .regions import effective_min_npix
-    from .utils import FLAG_INPUT_ISBAD
+    from .utils import FLAG_REGION_EXCLUDE
 
     F = int(oversample)
     half_r_hr = kernel_vecs[0].shape[1] // 2
@@ -220,7 +220,7 @@ def populate_region_vectors(
 
     good = np.isfinite(image[ys, xs])
     if input_mask is not None:
-        good &= (input_mask[ys, xs].astype(np.int32) & FLAG_INPUT_ISBAD) == 0
+        good &= (input_mask[ys, xs].astype(np.int32) & FLAG_REGION_EXCLUDE) == 0
     ys, xs = ys[good], xs[good]
     if ys.size < min_npix:
         return False

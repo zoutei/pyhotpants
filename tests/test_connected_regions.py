@@ -177,3 +177,56 @@ def test_e2e_connected_synthetic():
     sol, used = hp.iterative_fit_and_clip()
     assert sol is not None
     assert len(used) >= 1
+
+
+def test_gate_rejects_caller_input_mask():
+    """A star whose rss box touches the caller's mask (FLAG_INPUT_MASK) must not seed a region."""
+    from hotpants.pure.regions import gate_catalog_stars_for_regions
+    from hotpants.pure.utils import FLAG_INPUT_ISBAD, FLAG_INPUT_MASK
+
+    img = np.ones((60, 60), dtype=np.float32)
+    xy = np.array([[20.0, 20.0], [40.0, 40.0], [20.0, 40.0]])
+    m = np.zeros((60, 60), dtype=np.int32)
+    m[21, 22] = FLAG_INPUT_MASK  # inside the rss=3 box of (20, 20)
+    m[39, 41] = FLAG_INPUT_ISBAD  # inside the box of (40, 40)
+    kept = gate_catalog_stars_for_regions(xy, img, m, rss=3, rkernel=3)
+    assert kept.tolist() == [[20.0, 40.0]]
+
+
+def _masked_blob_run(add_blob):
+    rng = np.random.default_rng(3)
+    ny, nx = 100, 100
+    tpl = np.full((ny, nx), 100.0, dtype=np.float32)
+    sci = np.full((ny, nx), 100.0, dtype=np.float32)
+    stars = [(25, 25), (29, 25), (60, 60), (75, 40), (40, 75)]
+    for x, y in stars:
+        yy, xx = np.mgrid[-5:6, -5:6]
+        psf = np.exp(-(xx**2 + yy**2) / (2 * 1.2**2)).astype(np.float32)
+        tpl[y - 5 : y + 6, x - 5 : x + 6] += 60 * psf
+        sci[y - 5 : y + 6, x - 5 : x + 6] += 90 * psf
+    sci += rng.normal(0, 0.5, sci.shape).astype(np.float32)
+    tpl += rng.normal(0, 0.5, tpl.shape).astype(np.float32)
+    i_mask = np.zeros((ny, nx), dtype=bool)
+    i_mask[57:60, 62:65] = True  # inside the region box of the (60, 60) star
+    if add_blob:
+        sci[57:60, 62:65] += 40.0  # unmodelled light, under the caller's mask only
+    cat = np.array([[x + 1.0, y + 1.0] for x, y in stars], dtype=np.float32)
+    cfg = HotpantsConfig(
+        nx=nx, ny=ny, rss=4, rkernel=5, ko=1, bgo=0, force_convolve="t", stamp_mode="connected_regions",
+        region_weight="uniform", region_min_npix=20, deg_fixe=[2], sigma_gauss=[1.0], kf_spread_mask1=0.0,
+        iuthresh=1e9, tuthresh=1e9, iuktresh=1e9, tuktresh=1e9, verbose=0,
+    )
+    hp = Hotpants(tpl, sci, i_mask=i_mask, star_catalog=cat, config=cfg, use_c_extension=False)
+    hp.find_stamps()
+    n_regions = len(hp.results["region_map"].regions)
+    hp.fit_and_select_direction()
+    sol, used = hp.iterative_fit_and_clip()
+    return np.asarray(sol, dtype=float), n_regions
+
+
+def test_region_fit_ignores_caller_masked_pixels():
+    """Light under the caller's i_mask must not change the connected-region kernel/background solution."""
+    clean, n_clean = _masked_blob_run(add_blob=False)
+    blob, n_blob = _masked_blob_run(add_blob=True)
+    assert n_clean == n_blob >= 2
+    np.testing.assert_allclose(blob, clean, rtol=0, atol=1e-10)

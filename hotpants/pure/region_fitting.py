@@ -63,7 +63,8 @@ def assign_region_weights(stamps, mode="uniform", cap=(0.25, 4.0)):
         s.region_weight = float(np.clip(float(v / med), lo, hi))
 
 
-def stamp_sigma_region(stamp, coeffs, fig_merit="v", mask=None, FLAG_INPUT_ISBAD=0x80):
+def stamp_sigma_region(stamp, coeffs, fig_merit="v", mask=None, FLAG_INPUT_ISBAD=0xA0):
+    # default = FLAG_REGION_EXCLUDE (FLAG_INPUT_ISBAD | FLAG_INPUT_MASK): the caller's mask stays out of clipping
     model = coeffs @ stamp.vectors
     resid = stamp.substamp - model
     good = np.isfinite(resid) & (np.abs(stamp.substamp) > 1e-20)
@@ -241,7 +242,7 @@ def fit_kernel_regions(
     prefilled_by_region=None,
 ):
     """Iterative global fit for connected-region irregular stamps."""
-    FLAG_INPUT_ISBAD = 0x80
+    from .utils import FLAG_REGION_EXCLUDE
 
     if stamps and isinstance(stamps[0], (list, tuple)):
         stamp_groups = stamps
@@ -400,7 +401,7 @@ def fit_kernel_regions(
         bad_fill = []
         for si, s in enumerate(active_stamps):
             c = _local_coeffs_from_solution(solution, s.weights, n_comp_ker, n_spatial, n_bg)
-            sigma = stamp_sigma_region(s, c, fig_merit, mask, FLAG_INPUT_ISBAD)
+            sigma = stamp_sigma_region(s, c, fig_merit, mask, FLAG_REGION_EXCLUDE)
             if sigma < 0:
                 bad_fill.append(si)
                 sigmas.append(np.nan)
