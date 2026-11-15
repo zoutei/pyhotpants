@@ -1,4 +1,3 @@
-
 import numpy as np
 from numba import njit, prange
 from .utils import downsample_image
@@ -8,7 +7,8 @@ from .utils import downsample_image
 # Matches alard.c: xy_conv_stamp
 # =========================================================
 
-@njit(cache=True)
+
+@njit(boundscheck=True, cache=True)
 def jit_xy_conv_stamp(image_patch, filter_x, filter_y, ren_vector=None):
     """
     Perform separable convolution on a small patch.
@@ -17,13 +17,13 @@ def jit_xy_conv_stamp(image_patch, filter_x, filter_y, ren_vector=None):
     ny, nx = image_patch.shape
     fw_kernel = len(filter_x)
     hw_kernel = fw_kernel // 2
-    
+
     res_ny = ny - 2 * hw_kernel
     res_nx = nx - 2 * hw_kernel
-    
+
     conv_patch = np.zeros((res_ny, res_nx), dtype=np.float64)
-    temp_patch = np.zeros((res_ny, nx), dtype=np.float64) 
-    
+    temp_patch = np.zeros((res_ny, nx), dtype=np.float64)
+
     # Y-Pass
     for i in range(nx):
         for j in range(res_ny):
@@ -31,7 +31,7 @@ def jit_xy_conv_stamp(image_patch, filter_x, filter_y, ren_vector=None):
             for yc in range(fw_kernel):
                 val += image_patch[j + yc, i] * filter_y[yc]
             temp_patch[j, i] = val
-            
+
     # X-Pass
     for j in range(res_ny):
         for i in range(res_nx):
@@ -39,24 +39,35 @@ def jit_xy_conv_stamp(image_patch, filter_x, filter_y, ren_vector=None):
             for xc in range(fw_kernel):
                 val += temp_patch[j, i + xc] * filter_x[xc]
             conv_patch[j, i] = val
-            
+
     # Subtraction (ren logic)
     if ren_vector is not None:
         for j in range(res_ny):
             for i in range(res_nx):
                 conv_patch[j, i] -= ren_vector[j, i]
-                
+
     return conv_patch
+
 
 # =========================================================
 # Global Spatial Convolution (Block-Based)
 # Matches alard.c: spatial_convolve / make_kernel
 # =========================================================
 
-@njit(cache=True)
-def jit_make_kernel(kernel_sol, kc_step, hw_kernel, r_pix_x, r_pix_y, 
-                    n_comp_ker, ker_order, kernel_vecs,
-                    block_center_x, block_center_y):
+
+@njit(boundscheck=True, cache=True)
+def jit_make_kernel(
+    kernel_sol,
+    kc_step,
+    hw_kernel,
+    r_pix_x,
+    r_pix_y,
+    n_comp_ker,
+    ker_order,
+    kernel_vecs,
+    block_center_x,
+    block_center_y,
+):
     """
     Construct the local kernel at the block center.
     Matches alard.c make_kernel (C kernelSol layout with leading slot).
@@ -93,12 +104,21 @@ def jit_make_kernel(kernel_sol, kc_step, hw_kernel, r_pix_x, r_pix_y,
     return local_kernel
 
 
-@njit(cache=True, parallel=True)
-def jit_spatial_convolve(image, kernel_sol, variance, mask,
-                         kc_step, hw_kernel,
-                         n_comp_ker, ker_order, kernel_vecs,
-                         convolve_variance=False, ker_frac_mask=0.0,
-                         oversample=1):
+@njit(boundscheck=True, cache=True, parallel=True)
+def jit_spatial_convolve(
+    image,
+    kernel_sol,
+    variance,
+    mask,
+    kc_step,
+    hw_kernel,
+    n_comp_ker,
+    ker_order,
+    kernel_vecs,
+    convolve_variance=False,
+    ker_frac_mask=0.0,
+    oversample=1,
+):
     """
     Block-based spatial convolution matching spatial_convolve in alard.c.
 
@@ -121,6 +141,15 @@ def jit_spatial_convolve(image, kernel_sol, variance, mask,
     out_variance = np.zeros((ny, nx), dtype=np.float32)
     # Match C py_apply_kernel: fresh zero output mask (not a copy of input)
     out_mask = np.zeros((ny, nx), dtype=np.int32)
+    for y in range(ny):
+        for x in range(nx):
+            if (
+                x < hw_kernel
+                or y < hw_kernel
+                or x >= nx - hw_kernel
+                or y >= ny - hw_kernel
+            ):
+                out_mask[y, x] = mask[y, x] | FLAG_OUTPUT_ISBAD
 
     # C: nsteps = ceil(size / kcStep); j0 = step*kcStep + hwKernel
     n_blocks_y = (ny + kc_step - 1) // kc_step
@@ -141,9 +170,16 @@ def jit_spatial_convolve(image, kernel_sol, variance, mask,
             cx = (i0 + hw_kernel) / float(oversample)
             cy = (j0 + hw_kernel) / float(oversample)
             local_kernel = jit_make_kernel(
-                kernel_sol, kc_step, hw_kernel, r_pix_x, r_pix_y,
-                n_comp_ker, ker_order, kernel_vecs,
-                cx, cy,
+                kernel_sol,
+                kc_step,
+                hw_kernel,
+                r_pix_x,
+                r_pix_y,
+                n_comp_ker,
+                ker_order,
+                kernel_vecs,
+                cx,
+                cy,
             )
 
             for j2 in range(kc_step):
@@ -190,7 +226,7 @@ def jit_spatial_convolve(image, kernel_sol, variance, mask,
                         current_mask |= FLAG_OUTPUT_ISBAD
                     if mbit != 0:
                         if aks > 0.0 and (uks / aks) < ker_frac_mask:
-                            current_mask |= (FLAG_OUTPUT_ISBAD | FLAG_BAD_CONV)
+                            current_mask |= FLAG_OUTPUT_ISBAD | FLAG_BAD_CONV
                         else:
                             current_mask |= FLAG_OK_CONV
                     out_mask[j, i] = current_mask
@@ -198,8 +234,10 @@ def jit_spatial_convolve(image, kernel_sol, variance, mask,
     return conv_image, out_variance, out_mask
 
 
-@njit(cache=True, parallel=True)
-def jit_get_background(kernel_sol, bg_order, n_comp_ker, ker_order, r_pix_x, r_pix_y, ny, nx):
+@njit(boundscheck=True, cache=True, parallel=True)
+def jit_get_background(
+    kernel_sol, bg_order, n_comp_ker, ker_order, r_pix_x, r_pix_y, ny, nx
+):
     """
     Calculate background image from solution.
     Matches get_background (C kernelSol layout with leading slot).
@@ -214,8 +252,7 @@ def jit_get_background(kernel_sol, bg_order, n_comp_ker, ker_order, r_pix_x, r_p
     n_needed = ncomp_bg + 1 + n_bg
     n_sol = kernel_sol.shape[0]
     if n_sol < n_needed:
-        # Leave zeros rather than indexing out of range (Numba has no exceptions here).
-        return background
+        raise ValueError("kernel solution is too short for background evaluation")
 
     for y in prange(ny):
         yf = (y - 0.5 * r_pix_y) / (0.5 * r_pix_y)
@@ -235,7 +272,8 @@ def jit_get_background(kernel_sol, bg_order, n_comp_ker, ker_order, r_pix_x, r_p
 
     return background
 
-@njit(cache=True, nogil=True)
+
+@njit(boundscheck=True, cache=True, nogil=True)
 def jit_convolve_patch(image, kernel):
     """
     2D patch convolution matching alard.c xy_conv_stamp filter orientation.
@@ -259,6 +297,7 @@ def jit_convolve_patch(image, kernel):
             output[y, x] = val
     return output
 
+
 def apply_kernel(image, kernel_sol, variance, mask, config, kernel_vecs, oversample=1):
     """
     High-level wrapper for spatial_convolve + background.
@@ -268,6 +307,9 @@ def apply_kernel(image, kernel_sol, variance, mask, config, kernel_vecs, oversam
     Convolution is done in HR, then downsampled.
     Background is calculated in LR.
     """
+    if isinstance(oversample, bool) or int(oversample) != oversample or oversample < 1:
+        raise ValueError("oversample must be a positive integer")
+    oversample = int(oversample)
     image = np.ascontiguousarray(image, dtype=np.float32)
     variance = np.ascontiguousarray(variance, dtype=np.float32)
     kernel_sol = np.ascontiguousarray(kernel_sol, dtype=np.float64)
@@ -289,12 +331,26 @@ def apply_kernel(image, kernel_sol, variance, mask, config, kernel_vecs, oversam
             f"variance={variance.shape}, mask={mask.shape}"
         )
 
+    if image.ndim != 2 or not image.size or any(d % oversample for d in image.shape):
+        raise ValueError("image must be nonempty, 2D and divisible by oversample")
+    if kernel_sol.ndim != 1 or not np.all(np.isfinite(kernel_sol)):
+        raise ValueError("kernel_sol must be a finite vector")
+    if (
+        kernel_vecs.ndim != 3
+        or kernel_vecs.shape[0] != config.ncomp_ker
+        or not np.all(np.isfinite(kernel_vecs))
+    ):
+        raise ValueError("kernel_vecs must contain the configured finite basis stack")
     h_b, w_b = kernel_vecs[0].shape
+    if h_b != w_b or h_b != 2 * config.rkernel * oversample + 1:
+        raise ValueError("kernel basis shape does not match configured support")
     hw_kernel_hr = w_b // 2
 
     # C default: kcStep = fwKernel
     fw_kernel_lr = 2 * config.rkernel + 1
     kc_step_lr = int(getattr(config, "kc_step", fw_kernel_lr) or fw_kernel_lr)
+    if kc_step_lr < 1:
+        raise ValueError("kernel evaluation step must be positive")
     kc_step_hr = kc_step_lr * oversample
 
     ker_order = config.ko
@@ -317,10 +373,17 @@ def apply_kernel(image, kernel_sol, variance, mask, config, kernel_vecs, oversam
     ker_frac_mask = float(getattr(config, "kfm", 0.99))
 
     conv_hr, var_hr, mask_out_hr = jit_spatial_convolve(
-        image, kernel_sol, variance, mask,
-        kc_step_hr, hw_kernel_hr,
-        n_basis, ker_order, kernel_vecs,
-        convolve_variance, ker_frac_mask,
+        image,
+        kernel_sol,
+        variance,
+        mask,
+        kc_step_hr,
+        hw_kernel_hr,
+        n_basis,
+        ker_order,
+        kernel_vecs,
+        convolve_variance,
+        ker_frac_mask,
         oversample,
     )
 
@@ -333,7 +396,9 @@ def apply_kernel(image, kernel_sol, variance, mask, config, kernel_vecs, oversam
         mask_out_lr = np.zeros((ny_lr, nx_lr), dtype=np.int32)
         for oy in range(oversample):
             for ox in range(oversample):
-                mask_out_lr |= mask_out_hr[oy::oversample, ox::oversample][:ny_lr, :nx_lr]
+                mask_out_lr |= mask_out_hr[oy::oversample, ox::oversample][
+                    :ny_lr, :nx_lr
+                ]
     else:
         conv_lr = conv_hr
         var_lr = var_hr
@@ -341,9 +406,14 @@ def apply_kernel(image, kernel_sol, variance, mask, config, kernel_vecs, oversam
 
     ny_lr, nx_lr = conv_lr.shape
     bg_lr = jit_get_background(
-        kernel_sol, config.bgo, ncomp_ker_layout, ker_order,
-        float(nx_lr), float(ny_lr),
-        ny_lr, nx_lr,
+        kernel_sol,
+        config.bgo,
+        ncomp_ker_layout,
+        ker_order,
+        float(nx_lr),
+        float(ny_lr),
+        ny_lr,
+        nx_lr,
     ).astype(np.float32)
 
     # Match C py_apply_kernel: do not force FLAG_OUTPUT_ISBAD on the hwKernel

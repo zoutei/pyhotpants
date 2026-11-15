@@ -6,7 +6,7 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath("../../"))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
@@ -14,8 +14,8 @@ sys.path.insert(0, os.path.abspath("../../"))
 project = "pyhotpants"
 copyright = "2025, Koji"
 author = "Koji"
-release = "0.2.0"
-version = "0.2.0"
+release = "0.3.0rc1"
+version = "0.3.0rc1"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -34,4 +34,5 @@ exclude_patterns = []
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = "sphinx_rtd_theme"
-html_static_path = ["_static"]
+html_static_path = []
+napoleon_use_ivar = True

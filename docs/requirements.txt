@@ -7,3 +7,5 @@ myst-parser
 numpy
 astropy
 numba
+
+scipy

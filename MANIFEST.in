@@ -1,5 +1,8 @@
-include README.md
-include pyproject.toml
-
-include src/*.[c,h,i]
-include hotpants/*.[c,h,py]
+include README.md CHANGELOG.md CITATION.cff LICENSE pyproject.toml
+include src/LICENSE
+include src/alard.c src/functions.c src/functions.h src/globals.h src/README.md
+recursive-include hotpants *.py *.c
+recursive-include tests *.py
+include tools/memory_probe.py tools/native_alloc_fail.c
+recursive-include docs *.md *.rst *.py *.txt
+prune docs/build

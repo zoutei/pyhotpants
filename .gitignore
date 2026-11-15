@@ -12,3 +12,6 @@ dev/_development_worktree/
 # local build dir and outputs written by the JWST example notebook
 build/
 example/jwst_*.fits
+dist/
+.pytest_cache/
+.ruff_cache/

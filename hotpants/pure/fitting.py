@@ -1,7 +1,7 @@
-
 import numpy as np
 from numba import njit, prange
 import scipy.linalg
+import warnings
 from .convolution import jit_xy_conv_stamp, jit_make_kernel, jit_convolve_patch
 from .kernel import get_spatial_polynomials
 from .utils import downsample_image
@@ -16,6 +16,12 @@ def _tikhonov_solve(M, b, lambda_reg=0.0):
     """
     M = np.asarray(M, dtype=np.float64)
     b = np.asarray(b, dtype=np.float64)
+    if M.ndim != 2 or M.shape[0] != M.shape[1] or b.shape != (M.shape[0],):
+        raise ValueError("normal equations require a square matrix and matching vector")
+    if not np.all(np.isfinite(M)) or not np.all(np.isfinite(b)):
+        raise np.linalg.LinAlgError("normal equations contain nonfinite values")
+    if not np.isfinite(lambda_reg) or lambda_reg < 0:
+        raise ValueError("lambda_reg must be finite and nonnegative")
     n = M.shape[0]
     M_reg = M.copy()
 
@@ -26,37 +32,45 @@ def _tikhonov_solve(M, b, lambda_reg=0.0):
         M_reg += lambda_reg * scale * np.eye(n)
 
     try:
-        lu, piv = scipy.linalg.lu_factor(M_reg)
-        return scipy.linalg.lu_solve((lu, piv), b)
-    except Exception:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", scipy.linalg.LinAlgWarning)
+            lu, piv = scipy.linalg.lu_factor(M_reg)
+            result = scipy.linalg.lu_solve((lu, piv), b)
+        if not np.all(np.isfinite(result)):
+            raise np.linalg.LinAlgError("nonfinite solve result")
+        return result
+    except (np.linalg.LinAlgError, scipy.linalg.LinAlgWarning):
         diag_A = np.diag(M_reg).copy()
         diag_A[diag_A <= 1e-20] = 1.0
         scale_vec = 1.0 / np.sqrt(diag_A)
         A_scaled = M_reg * scale_vec[:, None] * scale_vec[None, :]
         b_scaled = b * scale_vec
-        x_scaled, _, _, _ = np.linalg.lstsq(A_scaled, b_scaled, rcond=None)
-        return x_scaled * scale_vec
+        x_scaled, _, rank, _ = np.linalg.lstsq(A_scaled, b_scaled, rcond=None)
+        result = x_scaled * scale_vec
+        if rank == 0 or not np.all(np.isfinite(result)):
+            raise np.linalg.LinAlgError("normal equations have no finite solution")
+        return result
 
 
 class Stamp:
     def __init__(self, x, y, data=None, orig_idx=None):
         self.x = int(x)
         self.y = int(y)
-        self.orig_idx = orig_idx # Track original index from input list
-        self.vectors = None # (n_vecs, n_pix)
+        self.orig_idx = orig_idx  # Track original index from input list
+        self.vectors = None  # (n_vecs, n_pix)
         self.basis_vectors = None  # (n_basis, h, w)
         self.substamp = None  # The DATA (I) stamp (n_pix,)
         self.image_cutout = None
         self.template_cutout = None
-        self.weights = None # (n_spatial,)
-        self.norm = 0.0 # Kernel Sum
+        self.weights = None  # (n_spatial,)
+        self.norm = 0.0  # Kernel Sum
         self.chi2 = 0.0
-        self.diff = 0.0 # Rejection metric
+        self.diff = 0.0  # Rejection metric
         self.local_solution = None
         self.convolved_model_local = None
         self.ignore = False
         self.residuals = None
-        
+
         # Iteration state (C stamp_struct sscnt / nss / xss / yss)
         self.sscnt = 0
         self.nss = 1
@@ -71,6 +85,7 @@ class Stamp:
         self.xs = None
         self.npix = None
         self.noise_pix = None  # per-pixel noise variance aligned with substamp
+
 
 def populate_stamp_vectors(
     stamp, template, image, config, kernel_vecs, oversample=1, basis_lr_maps=None
@@ -102,7 +117,7 @@ def populate_stamp_vectors(
         return False
 
     data_stamp = image[y0:y1, x0:x1]
-    if np.any(np.isnan(data_stamp)):
+    if np.any(~np.isfinite(data_stamp)):
         return False  # Reject stamps with NaNs in data
 
     stamp.substamp = data_stamp.flatten()
@@ -135,11 +150,16 @@ def populate_stamp_vectors(
         x0_t_hr = int(x0 * oversample - half_r_hr)
         x1_t_hr = int(x1 * oversample + half_r_hr)
 
-        if y0_t_hr < 0 or x0_t_hr < 0 or y1_t_hr > template.shape[0] or x1_t_hr > template.shape[1]:
+        if (
+            y0_t_hr < 0
+            or x0_t_hr < 0
+            or y1_t_hr > template.shape[0]
+            or x1_t_hr > template.shape[1]
+        ):
             return False
 
         template_patch = template[y0_t_hr:y1_t_hr, x0_t_hr:x1_t_hr]
-        if np.any(np.isnan(template_patch)):
+        if np.any(~np.isfinite(template_patch)):
             return False
 
         stamp.template_cutout = template_patch  # view OK; no defensive copy on hot path
@@ -178,7 +198,7 @@ def populate_stamp_vectors(
     stamp.vectors = np.array(vectors)
     stamp.basis_vectors = np.array(basis_cutouts)
 
-    if np.any(np.isnan(stamp.vectors)):
+    if np.any(~np.isfinite(stamp.vectors)):
         return False
 
     return True
@@ -269,7 +289,7 @@ def populate_region_vectors(
             return False
 
         template_patch = template[y0_t:y1_t, x0_t:x1_t]
-        if np.any(np.isnan(template_patch)):
+        if np.any(~np.isfinite(template_patch)):
             return False
         stamp.template_cutout = template_patch  # no defensive copy
 
@@ -382,7 +402,9 @@ def fit_stamps_locally(
     n_comp_ker = len(kernel_vecs)
     ker_sig_reject = float(getattr(config, "ks", 2.0))
     stat_sig = float(getattr(config, "stat_sig", 3.0))
-    regions_by_id = {r.id: r for r in region_map.regions} if region_map is not None else {}
+    regions_by_id = (
+        {r.id: r for r in region_map.regions} if region_map is not None else {}
+    )
 
     for idx, s_obj in enumerate(stamps):
         stamp = Stamp(s_obj.x, s_obj.y, orig_idx=idx)
@@ -441,11 +463,13 @@ def fit_stamps_locally(
             stamp.residuals = resid_vec
             stamp.chi2 = float(np.sqrt(np.mean(resid_vec * resid_vec)))
             if stamp.image_cutout is not None and stamp.ys is None:
-                stamp.convolved_model_local = model_vec.reshape(stamp.image_cutout.shape)
+                stamp.convolved_model_local = model_vec.reshape(
+                    stamp.image_cutout.shape
+                )
             else:
                 stamp.convolved_model_local = model_vec
 
-            if np.isnan(stamp.chi2) or np.isnan(stamp.norm):
+            if not np.isfinite(stamp.chi2) or not np.isfinite(stamp.norm):
                 continue
 
             valid_stamps.append(stamp)
@@ -472,10 +496,11 @@ def fit_stamps_locally(
 
     return valid_stamps
 
-@njit(cache=True)
-def build_matrix_numba(n_comp_kernel, n_spatial, n_bg,
-                       stamp_vectors, stamp_weights,
-                       n_stamps, n_params):
+
+@njit(boundscheck=True, cache=True)
+def build_matrix_numba(
+    n_comp_kernel, n_spatial, n_bg, stamp_vectors, stamp_weights, n_stamps, n_params
+):
     """
     Build global matrix A matching alard.c build_matrix.
 
@@ -531,10 +556,17 @@ def build_matrix_numba(n_comp_kernel, n_spatial, n_bg,
     return A
 
 
-@njit(cache=True)
-def build_rhs_numba(n_comp_kernel, n_spatial, n_bg,
-                    stamp_vectors, stamp_weights, stamp_data_pixels,
-                    n_stamps, n_params):
+@njit(boundscheck=True, cache=True)
+def build_rhs_numba(
+    n_comp_kernel,
+    n_spatial,
+    n_bg,
+    stamp_vectors,
+    stamp_weights,
+    stamp_data_pixels,
+    n_stamps,
+    n_params,
+):
     """Build RHS matching alard.c build_scprod (0-based mat_size layout)."""
     b = np.zeros(n_params)
     n_var = n_comp_kernel - 1
@@ -642,7 +674,9 @@ def _pack_c_layout_solution(
     out[2 : 2 + n_var_params] = solution[1 : 1 + n_var_params]
     # C get_background: ncompBG = (nCompKer-1)*nComp + 1; uses kernelSol[ncompBG+k]
     ncomp_bg = (ncomp_ker_layout - 1) * n_spatial + 1
-    out[ncomp_bg + 1 : ncomp_bg + 1 + n_bg] = solution[1 + n_var_params : 1 + n_var_params + n_bg]
+    out[ncomp_bg + 1 : ncomp_bg + 1 + n_bg] = solution[
+        1 + n_var_params : 1 + n_var_params + n_bg
+    ]
     return out
 
 
@@ -795,13 +829,25 @@ def fit_kernel(
         stamp.sscnt = 0
 
         ok = populate_stamp_vectors(
-            stamp, template, image, config, kernel_vecs, oversample, basis_lr_maps=basis_lr_maps
+            stamp,
+            template,
+            image,
+            config,
+            kernel_vecs,
+            oversample,
+            basis_lr_maps=basis_lr_maps,
         )
         while not ok and stamp.sscnt + 1 < stamp.nss:
             stamp.sscnt += 1
             stamp.x, stamp.y = coords[stamp.sscnt]
             ok = populate_stamp_vectors(
-                stamp, template, image, config, kernel_vecs, oversample, basis_lr_maps=basis_lr_maps
+                stamp,
+                template,
+                image,
+                config,
+                kernel_vecs,
+                oversample,
+                basis_lr_maps=basis_lr_maps,
             )
         if not ok:
             continue
@@ -815,7 +861,9 @@ def fit_kernel(
             n_fit = n_comp_ker + 1
             vectors_fit = stamp.vectors[:n_fit]
             try:
-                coeffs_fit = np.linalg.solve(vectors_fit @ vectors_fit.T, vectors_fit @ stamp.substamp)
+                coeffs_fit = np.linalg.solve(
+                    vectors_fit @ vectors_fit.T, vectors_fit @ stamp.substamp
+                )
                 stamp.norm = float(coeffs_fit[0])
                 stamp.local_solution = coeffs_fit
                 local_ok.append(stamp)
@@ -823,9 +871,15 @@ def fit_kernel(
                 stamp.ignore = True
         if len(local_ok) >= 3:
             k_sums = np.array([s.norm for s in local_ok], dtype=np.float64)
-            kmean, kstdev = _sigma_clip_mean_stdev(k_sums, stat_sig=stat_sig, maxiter=10)
+            kmean, kstdev = _sigma_clip_mean_stdev(
+                k_sums, stat_sig=stat_sig, maxiter=10
+            )
             for s in local_ok:
-                s.diff = abs((s.norm - kmean) / kstdev) if kstdev > 0 and kstdev < 1e29 else 0.0
+                s.diff = (
+                    abs((s.norm - kmean) / kstdev)
+                    if kstdev > 0 and kstdev < 1e29
+                    else 0.0
+                )
                 s.ignore = s.diff >= ker_sig_reject
 
     solution = None
@@ -843,7 +897,13 @@ def fit_kernel(
         x1 = x0 + 2 * half_stamp + 1
         fw = 2 * half_stamp + 1
         good = np.isfinite(resid) & (np.abs(stamp.substamp) > 1e-20)
-        if mask is not None and 0 <= y0 and 0 <= x0 and y1 <= mask.shape[0] and x1 <= mask.shape[1]:
+        if (
+            mask is not None
+            and 0 <= y0
+            and 0 <= x0
+            and y1 <= mask.shape[0]
+            and x1 <= mask.shape[1]
+        ):
             mcut = mask[y0:y1, x0:x1].ravel().astype(np.int32)
             if mcut.size == resid.size:
                 good &= (mcut & FLAG_INPUT_ISBAD) == 0
@@ -878,8 +938,19 @@ def fit_kernel(
         s_weights = np.stack([s.weights for s in active_stamps])
         s_data = np.stack([s.substamp for s in active_stamps])
 
-        A = build_matrix_numba(n_comp_ker, n_spatial, n_bg, s_vectors, s_weights, n_active, n_params)
-        b = build_rhs_numba(n_comp_ker, n_spatial, n_bg, s_vectors, s_weights, s_data, n_active, n_params)
+        A = build_matrix_numba(
+            n_comp_ker, n_spatial, n_bg, s_vectors, s_weights, n_active, n_params
+        )
+        b = build_rhs_numba(
+            n_comp_ker,
+            n_spatial,
+            n_bg,
+            s_vectors,
+            s_weights,
+            s_data,
+            n_active,
+            n_params,
+        )
 
         try:
             solution = _tikhonov_solve(A, b, lambda_reg=lambda_reg)
@@ -899,7 +970,9 @@ def fit_kernel(
         sigmas = []
         bad_fill = []
         for si, s in enumerate(active_stamps):
-            c = _local_coeffs_from_solution(solution, s.weights, n_comp_ker, n_spatial, n_bg)
+            c = _local_coeffs_from_solution(
+                solution, s.weights, n_comp_ker, n_spatial, n_bg
+            )
             sigma = _stamp_sigma(s, c)
             if sigma < 0:
                 bad_fill.append(si)
@@ -914,19 +987,33 @@ def fit_kernel(
             if verbose >= 2:
                 print(f"    stamp ({s.x},{s.y}) BAD sig; advance sscnt")
             _advance_stamp_group(
-                s, template, image, config, kernel_vecs, oversample,
-                ker_order, lr_nx, lr_ny, basis_lr_maps=basis_lr_maps,
+                s,
+                template,
+                image,
+                config,
+                kernel_vecs,
+                oversample,
+                ker_order,
+                lr_nx,
+                lr_ny,
+                basis_lr_maps=basis_lr_maps,
             )
             need_refit = True
 
-        good_sigmas = np.array([sg for sg in sigmas if np.isfinite(sg)], dtype=np.float64)
+        good_sigmas = np.array(
+            [sg for sg in sigmas if np.isfinite(sg)], dtype=np.float64
+        )
         if good_sigmas.size == 0:
             break
 
-        mean_sig, std_sig = _sigma_clip_mean_stdev(good_sigmas, stat_sig=stat_sig, maxiter=10)
+        mean_sig, std_sig = _sigma_clip_mean_stdev(
+            good_sigmas, stat_sig=stat_sig, maxiter=10
+        )
         fit_stats["meansig"] = mean_sig
         fit_stats["scatter"] = std_sig
-        fit_stats["n_skipped"] = sum(1 for s in valid_stamps if s.ignore or s.sscnt >= s.nss)
+        fit_stats["n_skipped"] = sum(
+            1 for s in valid_stamps if s.ignore or s.sscnt >= s.nss
+        )
 
         if std_sig == 0 or std_sig >= 1e29:
             if not need_refit:
@@ -942,8 +1029,16 @@ def fit_kernel(
                             f"{mean_sig + ker_sig_reject * std_sig:.3f}; advance sscnt"
                         )
                     _advance_stamp_group(
-                        s, template, image, config, kernel_vecs, oversample,
-                        ker_order, lr_nx, lr_ny, basis_lr_maps=basis_lr_maps,
+                        s,
+                        template,
+                        image,
+                        config,
+                        kernel_vecs,
+                        oversample,
+                        ker_order,
+                        lr_nx,
+                        lr_ny,
+                        basis_lr_maps=basis_lr_maps,
                     )
                     need_refit = True
 
@@ -954,7 +1049,9 @@ def fit_kernel(
         for s in final_active_stamps:
             if s.ignore:
                 continue
-            c = _local_coeffs_from_solution(solution, s.weights, n_comp_ker, n_spatial, n_bg)
+            c = _local_coeffs_from_solution(
+                solution, s.weights, n_comp_ker, n_spatial, n_bg
+            )
             model = c @ s.vectors
             if s.image_cutout is not None:
                 s.convolved_model_global = model.reshape(s.image_cutout.shape)
@@ -966,4 +1063,3 @@ def fit_kernel(
         s.fit_stats = fit_stats
 
     return packed if packed is not None else solution, final_active_stamps
-

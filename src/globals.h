@@ -1,3 +1,6 @@
+#ifndef PYHOTPANTS_GLOBALS_H
+#define PYHOTPANTS_GLOBALS_H
+
 typedef struct
 {
    int       x0,y0;       /* origin of stamp in region coords*/
@@ -45,6 +48,7 @@ typedef struct
 
 /* A single struct to hold all state, replacing global variables */
 typedef struct {
+    int error; /* 1: allocation failure; 2: singular/invalid numerical fit */
     int nx, ny;
     float tUThresh, tLThresh, tUKThresh, tGain, tRdnoise, tPedestal;
     float iUThresh, iLThresh, iUKThresh, iGain, iRdnoise, iPedestal;
@@ -97,3 +101,5 @@ typedef struct {
     int Ncmp;
 } hotpants_state_t;
 
+
+#endif

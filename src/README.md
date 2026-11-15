@@ -1,3 +1,9 @@
+Python package note: only `alard.c` and `functions.c` are compiled with the
+Python extension. The other standalone programs in this repository are
+historical references, not a supported or buildable CLI for this refactored
+stateful library. The CLI width convention below differs from the wrapper
+coefficient convention documented in the top-level README.
+
 hotpants
 ========
 

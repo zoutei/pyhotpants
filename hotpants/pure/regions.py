@@ -38,7 +38,9 @@ class RegionMap:
     regions: List[Region]
 
 
-def _paint_boxes(ny: int, nx: int, xs: np.ndarray, ys: np.ndarray, rss: int) -> np.ndarray:
+def _paint_boxes(
+    ny: int, nx: int, xs: np.ndarray, ys: np.ndarray, rss: int
+) -> np.ndarray:
     mask = np.zeros((ny, nx), dtype=bool)
     for xi, yi in zip(xs.astype(int), ys.astype(int)):
         y0, y1 = max(0, yi - rss), min(ny, yi + rss + 1)
@@ -56,14 +58,21 @@ def _component_diameter(label_map: np.ndarray, lid: int) -> float:
     return float(max(dy, dx, np.hypot(dy, dx)))
 
 
-def _stars_for_label(label_map: np.ndarray, xs: np.ndarray, ys: np.ndarray, lid: int) -> np.ndarray:
+def _stars_for_label(
+    label_map: np.ndarray, xs: np.ndarray, ys: np.ndarray, lid: int
+) -> np.ndarray:
     at = label_map[ys, xs] == lid
     if np.any(at):
         return at
     ys_c, xs_c = np.where(label_map == lid)
     if ys_c.size == 0:
         return np.zeros(len(xs), dtype=bool)
-    return (xs >= xs_c.min()) & (xs <= xs_c.max()) & (ys >= ys_c.min()) & (ys <= ys_c.max())
+    return (
+        (xs >= xs_c.min())
+        & (xs <= xs_c.max())
+        & (ys >= ys_c.min())
+        & (ys <= ys_c.max())
+    )
 
 
 def _split_star_groups(
@@ -168,7 +177,20 @@ def build_connected_regions(
     Build exclusive label map from catalog star centers (N,2) in 0-based LR pixels.
     """
     ny, nx = image_shape
+    if ny <= 0 or nx <= 0 or not isinstance(rss, (int, np.integer)) or rss < 1:
+        raise ValueError("image dimensions and rss must be positive integers")
+    if (
+        not np.isfinite(max_diameter)
+        or max_diameter <= 0
+        or max_area < 0
+        or connectivity not in (4, 8)
+    ):
+        raise ValueError("invalid region geometry parameters")
+    if flux_image is not None and np.shape(flux_image) != image_shape:
+        raise ValueError("flux_image must match image_shape")
     xy = np.asarray(xy, dtype=np.float64)
+    if xy.size and (xy.ndim != 2 or xy.shape[1] != 2 or not np.all(np.isfinite(xy))):
+        raise ValueError("xy must be a finite (N, 2) coordinate array")
     if xy.size == 0:
         return RegionMap(labels=np.zeros((ny, nx), dtype=np.int32), regions=[])
     xs = np.rint(xy[:, 0]).astype(int)
@@ -179,7 +201,11 @@ def build_connected_regions(
         return RegionMap(labels=np.zeros((ny, nx), dtype=np.int32), regions=[])
 
     occupied = _paint_boxes(ny, nx, xs, ys, rss)
-    struct = STRUCT8 if connectivity >= 8 else np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=bool)
+    struct = (
+        STRUCT8
+        if connectivity >= 8
+        else np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=bool)
+    )
     labeled, n_comp = ndimage.label(occupied, structure=struct)
 
     groups: List[np.ndarray] = []
@@ -202,7 +228,9 @@ def build_connected_regions(
             solo = _paint_exclusive_labels(ny, nx, xs, ys, [g], rss)
             npix = int(np.count_nonzero(solo))
             if npix > max_area and g.size > 1:
-                refined.extend(_split_star_groups(g, xs, ys, max(1.0, max_diameter * 0.7), rss))
+                refined.extend(
+                    _split_star_groups(g, xs, ys, max(1.0, max_diameter * 0.7), rss)
+                )
             else:
                 refined.append(g)
         groups = refined
@@ -218,7 +246,9 @@ def build_connected_regions(
     return RegionMap(labels=labels, regions=regions)
 
 
-def region_pixel_coords(labels: np.ndarray, region_id: int) -> Tuple[np.ndarray, np.ndarray]:
+def region_pixel_coords(
+    labels: np.ndarray, region_id: int
+) -> Tuple[np.ndarray, np.ndarray]:
     return np.where(labels == region_id)
 
 
@@ -256,7 +286,11 @@ def remove_star_from_region(
         if reg.id != region_id:
             regions.append(reg)
             continue
-        active = [p for p in reg.member_xy if p not in reg.excluded_xy and not (p[0] == sx and p[1] == sy)]
+        active = [
+            p
+            for p in reg.member_xy
+            if p not in reg.excluded_xy and not (p[0] == sx and p[1] == sy)
+        ]
         ys, xs = np.where(labels == region_id)
         if ys.size == 0 or not reg.member_xy:
             labels[labels == region_id] = 0
@@ -282,7 +316,9 @@ def remove_star_from_region(
             labels[ys[clear], xs[clear]] = 0
 
         excluded = list(reg.excluded_xy) + [(sx, sy)]
-        new_reg = _region_from_label(labels, region_id, active, flux_image=flux_image, excluded_xy=excluded)
+        new_reg = _region_from_label(
+            labels, region_id, active, flux_image=flux_image, excluded_xy=excluded
+        )
         if new_reg is not None:
             regions.append(new_reg)
         # if None, region emptied — drop from list; labels already cleared for those pixels

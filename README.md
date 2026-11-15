@@ -6,7 +6,12 @@
 
 This project is **not** affiliated with the original HOTPANTS project. It is currently under active development and may contain bugs or incomplete features. By using this software you acknowledge that the maintainers are not responsible for any damage, incorrect scientific results, or other issues that may arise from its use.
 
-**Branch / version note:** Stable installs from ``main`` track **0.1.x** (C extension default). This ``development`` branch is **0.2.0 staging**: opt-in pure Python backend, oversampled templates, and connected-region stamps. Prefer ``main`` for production until 0.2.0 is promoted.
+**Release candidate: 0.3.0rc1.** This audit branch adds native memory-safety
+fixes and explicit numerical contracts. The previously tagged release is
+`v0.2.0`. Read [CHANGELOG.md](CHANGELOG.md) before migrating: normalization,
+pedestal handling, mask propagation, and singular-fit behavior have changed.
+The C extension remains the default; connected regions and oversampling use the
+Python/Numba backend. This candidate has not been published to Zenodo or ASCL.
 
 
 ## pyhotpants
@@ -37,7 +42,7 @@ solution) or run the whole pipeline with a single call.
     via a lightweight extension.
 - Standalone template convolution (0.1.2+). Reuse a saved kernel with
     `KernelModel` / `convolve_template` without re-running the full pipeline.
-- Opt-in pure Python backend (0.2.0 staging). Set `use_c_extension=False` for
+- Opt-in Python/Numba backend. Set `use_c_extension=False` for
     the Numba/NumPy path; required for `oversample>1` and
     `stamp_mode="connected_regions"`.
 
@@ -51,11 +56,12 @@ pip install git+https://github.com/zoutei/pyhotpants
 
 ## Requirements
 
-- Python: as declared in `pyproject.toml` (>=3.6). We recommend Python 3.8+.
+- Python: as declared in `pyproject.toml` (>=3.10).
 - Core dependencies (installed automatically):
-    - numpy >= 1.15.0
-    - astropy >= 3.0.0
-    - numba >= 0.51.2
+    - numpy >= 1.23.5
+    - astropy >= 5.2
+    - numba >= 0.57
+    - scipy >= 1.10
 
 To install the package for development:
 
@@ -319,3 +325,43 @@ open an issue or submit a pull request on the GitHub repository.
 
 This project is licensed under the MIT License — see the `LICENSE` file for
 details.
+
+## Numerical and ownership contracts
+
+- `sigma_gauss` retains its historical wrapper meaning: coefficients in
+  `exp(-coefficient * x**2)`, **not Gaussian widths in pixels**. For a desired
+  width `sigma`, pass `1/(2*sigma**2)`. This differs from the original CLI's
+  `-ng` input conversion. No implicit conversion was introduced in 0.3.
+- `normalize="t"` (default) and `"i"` now select the photometric units of all
+  returned image products. `normalize="u"` preserves the previous wrapper's
+  unscaled reference-image units. The difference sign remains reference minus
+  convolved model, for either convolution direction.
+- Nonzero input pedestals are subtracted, including from explicit thresholds.
+- Output masks flag uncomputed convolution borders and caller-masked pixels.
+  Returned image values remain raw; consumers must use `output_mask` to select
+  valid pixels. `fillval` participates in input masking, not automatic filling
+  of all output images.
+- Each `Hotpants` instance snapshots its input images and configuration. Create
+  a new object to change numerical settings; output filenames may be changed.
+- Native entry points require exact native-endian, aligned, C-contiguous NumPy
+  buffers. The public Python interface converts ordinary arrays for you.
+- PCA bases are unsupported and explicitly rejected. `lambda_reg` requires the
+  Python backend. `bgo=-1` is supported by both backends.
+- The kernel and background coefficient layout remains compatible with 0.2.0.
+  `KernelModel.from_hotpants` copies its configuration and coefficients. Standalone
+  saved-kernel convolution currently supports native-resolution fits only.
+
+## Testing
+
+Install `.[test]` and run `python -m pytest tests`. Native boundary regressions,
+full synthetic workflows, C/Python fixed-operator comparisons, connected-region
+masking and oversampled FFT tests are included. See
+[docs/AUDIT.md](docs/AUDIT.md) for the audit scope, memory tools and limitations.
+
+## Citation and archival release
+
+`CITATION.cff` supplies software citation metadata. It credits the wrapper
+separately from the original HOTPANTS implementation. No DOI is claimed yet.
+Before publishing, select a final version, confirm creator metadata, archive
+that exact release on Zenodo, then register the short description and code links
+with ASCL. See [docs/RELEASING.md](docs/RELEASING.md).

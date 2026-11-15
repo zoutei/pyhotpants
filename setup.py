@@ -6,14 +6,20 @@ import numpy as np
 if sys.platform == "win32":
     # Windows-specific settings
     libraries = []
-    extra_compile_args = []
+    extra_compile_args = ["/std:c11"]
     define_macros = [
         ("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION"),
         # ("_CRT_SECURE_NO_WARNINGS", None),
     ]
 else:
     libraries = ["m"]
-    extra_compile_args = ["-g", "-O2", "-std=c99"]
+    extra_compile_args = [
+        "-g",
+        "-O2",
+        "-std=c99",
+        "-Werror=implicit-function-declaration",
+        "-Werror=return-type",
+    ]
     define_macros = [("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")]
 # ------------------------------------
 

@@ -1,3 +1,7 @@
+#ifndef PYHOTPANTS_FUNCTIONS_H
+#define PYHOTPANTS_FUNCTIONS_H
+#include "globals.h"
+
 /* Alard.c */
 void        getKernelVec(hotpants_state_t *);
 int         fillStamp(hotpants_state_t *, stamp_struct *, float *, float *);
@@ -66,3 +70,5 @@ void   make_lupton_kernel(double, double *, int);
 void   lanczos3(double, double *);
 void   lanczos4(double, double *);
 void   lanczos(double, double *, int);
+
+#endif

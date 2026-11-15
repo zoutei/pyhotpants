@@ -43,6 +43,7 @@ void getKernelVec(hotpants_state_t *state) {
                 }
                 /* stores kernel weight mask for each order */
                 state->kernel_vec[nvec] = kernel_vector(state, nvec, idegx, idegy, ig, &ren);
+                if (!state->kernel_vec[nvec]) { if (!state->error) state->error = 1; return; }
                 nvec++;
             }
         }
@@ -75,6 +76,11 @@ int fillStamp(hotpants_state_t *state, stamp_struct *stamp, float *imConv, float
         return 1;
     }
     
+    int pad = state->hwKSStamp + state->hwKernel;
+    int sx = stamp->xss[stamp->sscnt], sy = stamp->yss[stamp->sscnt];
+    if (sx < pad || sy < pad || sx >= state->nx-pad || sy >= state->ny-pad) {
+        state->error = 2; return 1;
+    }
     nvec = 0;
     for (ig = 0; ig < state->ngauss; ig++) {
         for (idegx = 0; idegx <= state->deg_fixe[ig]; idegx++) {
@@ -149,6 +155,7 @@ double *kernel_vector(hotpants_state_t *state, int n, int deg_x, int deg_y, int 
     }
     
     vector = (double *)malloc(state->fwKernel*state->fwKernel*sizeof(double));
+    if (!vector) { state->error = 1; return NULL; }
     dx = (deg_x / 2) * 2 - deg_x;
     dy = (deg_y / 2) * 2 - deg_y;
     sum_x = sum_y = 0.0;
@@ -167,8 +174,10 @@ double *kernel_vector(hotpants_state_t *state, int n, int deg_x, int deg_y, int 
     if (n > 0)
         kernel0 = state->kernel_vec[0];
     
-    sum_x = 1. / sum_x;
-    sum_y = 1. / sum_y;
+    if (dx == 0 && dy == 0 && (!isfinite(sum_x) || !isfinite(sum_y) || sum_x <= 0 || sum_y <= 0)) {
+        free(vector); state->error = 2; return NULL;
+    }
+    if (dx == 0 && dy == 0) { sum_x = 1. / sum_x; sum_y = 1. / sum_y; }
     
     if (dx == 0 && dy == 0) {
         for (ix = 0; ix < state->fwKernel; ix++) {
@@ -209,6 +218,7 @@ double *kernel_vector_PCA(hotpants_state_t *state, int n, int deg_x, int deg_y, 
     int i,j;
     
     vector = (double *)malloc(state->fwKernel*state->fwKernel*sizeof(double));
+    if (!vector) { state->error = 1; return NULL; }
     
     for (i = 0; i < state->fwKernel; i++) {
         for (j = 0; j < state->fwKernel; j++) {
@@ -321,7 +331,7 @@ void fitKernel(hotpants_state_t *state, stamp_struct *stamps, float *imRef, floa
      * Complete fit for kernel solution
      *****************************************************/
     
-    double d, **matrix;
+    double d, **matrix = NULL;
     char check;
     int i,mat_size;
     int ncomp1, ncomp2, ncomp, nbg_vec;
@@ -337,14 +347,20 @@ void fitKernel(hotpants_state_t *state, stamp_struct *stamps, float *imRef, floa
                               mat_size, ncomp2, ncomp1, nbg_vec);
     
     /* allocate fitting matrix */
-    matrix = (double **)malloc((mat_size + 1)*sizeof(double *));
-    for (i = 0; i <= mat_size; i++) 
-        matrix[i] = (double *)malloc((mat_size + 1)*sizeof(double));
+    matrix = (double **)calloc(mat_size + 1, sizeof(double *));
+    if (!matrix) { state->error = 1; goto cleanup; }
+    for (i = 0; i <= mat_size; i++) {
+        matrix[i] = (double *)calloc(mat_size + 1, sizeof(double));
+        if (!matrix[i]) { state->error = 1; goto cleanup; }
+    }
     
     /* allocate weight matrix */
-    state->wxy = (double **)malloc(state->nS*sizeof(double *));
-    for (i = 0; i < state->nS; i++)
-        state->wxy[i] = (double *)malloc(ncomp2*sizeof(double));
+    state->wxy = (double **)calloc(state->nS, sizeof(double *));
+    if (!state->wxy) { state->error = 1; goto cleanup; }
+    for (i = 0; i < state->nS; i++) {
+        state->wxy[i] = (double *)calloc(ncomp2, sizeof(double));
+        if (!state->wxy[i]) { state->error = 1; goto cleanup; }
+    }
     
     
     
@@ -352,19 +368,21 @@ void fitKernel(hotpants_state_t *state, stamp_struct *stamps, float *imRef, floa
     build_matrix(state, stamps, state->nS, matrix);
     build_scprod(state, stamps, state->nS, imRef, kernelSol);
     
-    ludcmp(matrix, mat_size, state->indx, &d);
+    int status = ludcmp(matrix, mat_size, state->indx, &d);
+    if (status) { state->error = status < 0 ? 1 : 2; goto cleanup; }
     lubksb(matrix, mat_size, state->indx, kernelSol);
     
     if (state->verbose>=1) fprintf(stderr, " Checking again\n");
     check = check_again(state, stamps, kernelSol, imConv, imRef, imNoise, meansigSubstamps, scatterSubstamps, NskippedSubstamps);
     
-    while(check) {
+    while(check && !state->error) {
         
         if (state->verbose>=1) fprintf(stderr, "\n Re-Expanding Matrix\n");
         build_matrix(state, stamps, state->nS, matrix);
         build_scprod(state, stamps, state->nS, imRef, kernelSol);
         
-        ludcmp(matrix, mat_size, state->indx, &d);
+        int status = ludcmp(matrix, mat_size, state->indx, &d);
+    if (status) { state->error = status < 0 ? 1 : 2; goto cleanup; }
         lubksb(matrix, mat_size, state->indx, kernelSol);
         
         if (state->verbose>=1) fprintf(stderr, " Checking again\n");          
@@ -372,10 +390,9 @@ void fitKernel(hotpants_state_t *state, stamp_struct *stamps, float *imRef, floa
     }
     if (state->verbose>=1) fprintf(stderr, " Sigma clipping of bad stamps converged, kernel determined\n");
     
-    for (i = 0; i <= mat_size; i++)
-        free(matrix[i]);
-    for (i = 0; i < state->nS; i++)
-        free(state->wxy[i]);
+cleanup:
+    if (matrix) for (i = 0; i <= mat_size; i++) free(matrix[i]);
+    if (state->wxy) for (i = 0; i < state->nS; i++) free(state->wxy[i]);
     free(matrix);
     free(state->wxy);
     state->wxy = NULL; 
@@ -416,6 +433,7 @@ void build_matrix0(hotpants_state_t *state, stamp_struct *stamp) {
         }
     }
     
+    if (nbg_vec == 0) return;
     for (i1 = 0; i1 < ncomp1; i1++) { 
         ivecbg = ncomp1;
         
@@ -469,6 +487,7 @@ void build_scprod0(hotpants_state_t *state, stamp_struct *stamp, float *image) {
         stamp->scprod[i1+1] = p0;
     }
     
+    if (nbg_vec == 0) return;
     /* Multiply first order background model with reference image */
     q = 0.0;
     for (xc = -state->hwKSStamp; xc <= state->hwKSStamp; xc++) {
@@ -489,13 +508,13 @@ double check_stamps(hotpants_state_t *state, stamp_struct *stamps, int nS, float
      * Returns a merit statistic, smaller for better fits
      *****************************************************/
     
-    int    nComps,i,im,jm,mcnt1,mcnt2,mcnt3;
+    int    nComps,i,im,jm,mcnt1=0,mcnt2=0,mcnt3=0;
     double d,sum=0,kmean,kstdev;
-    double merit1,merit2,merit3,sig1,sig2,sig3;
-    float *m1,*m2,*m3,*ks;
+    double merit1=MAXVAL,merit2=MAXVAL,merit3=MAXVAL,sig1,sig2,sig3;
+    float *m1=NULL,*m2=NULL,*m3=NULL,*ks;
     int    xc, yc, nks;
     
-    double **matrix;
+    double **matrix=NULL;
     int mat_size;
     int ncomp1, ncomp2, ncomp, nbg_vec;
     
@@ -504,7 +523,9 @@ double check_stamps(hotpants_state_t *state, stamp_struct *stamps, int nS, float
     stamp_struct *testStamps = NULL;
     
     /* kernel sum */
+    if (nS <= 0) return MAXVAL;
     ks  = (float *)calloc(nS, sizeof(float));
+    if (!ks) { state->error = 1; return MAXVAL; }
     nks = 0;
     
     ncomp1  = state->nCompKer - 1;
@@ -517,10 +538,11 @@ double check_stamps(hotpants_state_t *state, stamp_struct *stamps, int nS, float
                             , mat_size, ncomp2, ncomp1, nbg_vec);
     
     /* for inital fit */
-    nComps      = state->nCompKer + 1;
+    nComps      = state->nCompKer + (state->nBGVectors > 0);
     
     for (i = 0; i < nS; i++) {
         
+        if (stamps[i].nss == 0) { stamps[i].norm = NAN; stamps[i].diff = MAXVAL; continue; }
         xc    = stamps[i].xss[stamps[i].sscnt];
         yc    = stamps[i].yss[stamps[i].sscnt];
         
@@ -535,12 +557,16 @@ double check_stamps(hotpants_state_t *state, stamp_struct *stamps, int nS, float
         }
         
         /* fit stamp, the constant kernel coefficients end up in check_vec */
-        ludcmp(state->check_mat,nComps,state->indx,&d);
+        int solve_status = ludcmp(state->check_mat,nComps,state->indx,&d);
+        if (solve_status) {
+            if (solve_status < 0) { free(ks); state->error = 1; return MAXVAL; }
+            stamps[i].norm = NAN; stamps[i].diff = MAXVAL; continue;
+        }
         lubksb(state->check_mat,nComps,state->indx,state->check_vec);
         
         /* find kernel sum */
         sum = state->check_vec[1];
-        state->check_stack[i] = sum;
+        if (i < state->nStamps) state->check_stack[i] = sum;
         stamps[i].norm = sum;
         ks[nks++]      = sum;
         
@@ -550,6 +576,7 @@ double check_stamps(hotpants_state_t *state, stamp_struct *stamps, int nS, float
     }
     
     sigma_clip(state, ks, nks, &kmean, &kstdev, 10);
+    if (state->error) { free(ks); return MAXVAL; }
     
     if (state->verbose > 0) fprintf(stderr, "    %.1f sigma clipped mean ksum : %.3f, stdev : %.3f, n : %i\n",
             state->kerSigReject, kmean, kstdev, nks);
@@ -564,7 +591,8 @@ double check_stamps(hotpants_state_t *state, stamp_struct *stamps, int nS, float
     /* here we want to reject high sigma points on the HIGH and LOW
        side, since we want things with the same normalization */
     for (i = 0; i < nS; i++) {
-        stamps[i].diff = fabs((stamps[i].norm - kmean) / kstdev);
+        stamps[i].diff = !isfinite(stamps[i].norm) ? MAXVAL :
+            (kstdev > 0 && isfinite(kstdev) ? fabs((stamps[i].norm - kmean) / kstdev) : 0.0);
     }
     
     /*****************************************************
@@ -576,13 +604,19 @@ double check_stamps(hotpants_state_t *state, stamp_struct *stamps, int nS, float
         
         /* allocate fitting matrix */
         matrix = (double **)calloc((mat_size + 1), sizeof(double *));
-        for (i = 0; i <= mat_size; i++) 
-            matrix[i] = (double *)calloc((mat_size + 1), sizeof(double));
+        if (!matrix) { state->error = 1; goto cleanup; }
+        for (i = 0; i <= mat_size; i++) {
+            matrix[i] = (double *)calloc(mat_size + 1, sizeof(double));
+            if (!matrix[i]) { state->error = 1; goto cleanup; }
+        }
         
         /* allocate weight matrix */
         state->wxy = (double **)calloc(nS, sizeof(double *));
-        for (i = 0; i < nS; i++)
+        if (!state->wxy) { state->error = 1; goto cleanup; }
+        for (i = 0; i < nS; i++) {
             state->wxy[i] = (double *)calloc(ncomp2, sizeof(double));
+            if (!state->wxy[i]) { state->error = 1; goto cleanup; }
+        }
         
         /* first find out how many good stamps to allocate */
         ntestStamps = 0;
@@ -597,12 +631,13 @@ double check_stamps(hotpants_state_t *state, stamp_struct *stamps, int nS, float
                                           stamps[i].norm, stamps[i].diff);
             }
         
+        if (!ntestStamps) goto cleanup;
         /* then allocate test stamp structure */
         if(!(testStamps = (stamp_struct *)calloc(ntestStamps, sizeof(stamp_struct)))) {
-            printf("Cannot Allocate Test Stamp List\n"); 
-            exit (1);
+            state->error = 1; goto cleanup;
         }
         testKerSol = (double *)calloc((state->nCompTotal+1), sizeof(double));
+        if (!testKerSol) { state->error = 1; goto cleanup; }
         
         /* and point test stamp structure to good stamps */
         ntestStamps = 0;
@@ -614,7 +649,8 @@ double check_stamps(hotpants_state_t *state, stamp_struct *stamps, int nS, float
         if (state->verbose >= 2) fprintf(stderr, " Expanding Test Matrix For Fit\n");
         build_matrix(state, testStamps, ntestStamps, matrix);
         build_scprod(state, testStamps, ntestStamps, imRef, testKerSol);
-        ludcmp(matrix, mat_size, state->indx, &d);
+        int status = ludcmp(matrix, mat_size, state->indx, &d);
+        if (status) { if (status < 0) state->error = 1; goto cleanup; }
         lubksb(matrix, mat_size, state->indx, testKerSol);
         
         /* get the kernel sum to normalize figures of merit! */
@@ -630,6 +666,7 @@ double check_stamps(hotpants_state_t *state, stamp_struct *stamps, int nS, float
         
         /* noise sd based on histogram distribution width */
         m3 = (float *)calloc(ntestStamps, sizeof(float));
+        if (!m1 || !m2 || !m3) { state->error = 1; goto cleanup; }
         
         mcnt1 = 0;
         mcnt2 = 0;
@@ -657,20 +694,21 @@ double check_stamps(hotpants_state_t *state, stamp_struct *stamps, int nS, float
         merit2 /= kmean;
         merit3 /= kmean;
         
-        /* clean up this mess */
+cleanup:
+        /* Release every partial allocation and clear state ownership. */
         if (testKerSol)	 free(testKerSol);
         if (testStamps)	 free(testStamps);
-        for (i = 0; i <= mat_size; i++)
-            free(matrix[i]);
-        for (i = 0; i < nS; i++)
-            free(state->wxy[i]);
+        if (matrix) for (i = 0; i <= mat_size; i++) free(matrix[i]);
+        if (state->wxy) for (i = 0; i < nS; i++) free(state->wxy[i]);
         free(matrix);
         free(state->wxy);
+        state->wxy = NULL;
         
         free(m1);
         free(m2);
         free(m3);
         free(ks);
+        if (state->error) return MAXVAL;
         
         /* average value of figures of merit across stamps */
         if (state->verbose > 0) fprintf(stderr, "    <var_merit> = %.3f, <sd_merit> = %.3f, <hist_merit> = %.3f\n", merit1, merit2, merit3);
@@ -687,7 +725,7 @@ double check_stamps(hotpants_state_t *state, stamp_struct *stamps, int nS, float
                 return merit3;
             }
             else {
-                return 666;
+                return MAXVAL;
             }
         }
         else if (strncmp(state->figMerit_str, "s", 1)==0) {
@@ -701,7 +739,7 @@ double check_stamps(hotpants_state_t *state, stamp_struct *stamps, int nS, float
                 return merit3;
             }
             else {
-                return 666;
+                return MAXVAL;
             }
         }
         else if (strncmp(state->figMerit_str, "h", 1)==0) {      
@@ -715,13 +753,11 @@ double check_stamps(hotpants_state_t *state, stamp_struct *stamps, int nS, float
                 return merit2;
             }
             else {
-                return 666;
+                return MAXVAL;
             }
         }
     }
-    else
-        return 0;
-    
+    else { free(ks); return 0; }
     return 0;
 }
 
@@ -978,6 +1014,7 @@ void getStampSig(hotpants_state_t *state, stamp_struct *stamp, double *kernelSol
             tdat = state->temp[idx];
             idat = im[idx];
             ndat = imNoise[xRegion2+state->rPixX*yRegion2];
+            if (!isfinite(ndat) || ndat <= 0) continue;
             
             diff = tdat - idat + bg;
             
@@ -1036,7 +1073,9 @@ char check_again(hotpants_state_t *state, stamp_struct *stamps, double *kernelSo
     double sig1, sig2, sig3;
     float  *ss;
     
+    if (state->nS <= 0) { state->error = 2; return 0; }
     ss  = (float *)calloc(state->nS, sizeof(float));
+    if (!ss) { state->error = 1; return 0; }
     nss = 0;
     
     sig = 0;
@@ -1147,10 +1186,13 @@ void spatial_convolve(hotpants_state_t *state, float *image, float **variance, i
     
     if (dovar) {
         if ( !(vData = (float *)calloc(xSize*ySize, sizeof(float)))) {
-            return;
+            state->error = 1; return;
         }
     }
     
+    for (int y=0; y<ySize; y++) for (int x=0; x<xSize; x++)
+        if (x<state->hwKernel || y<state->hwKernel || x>=xSize-state->hwKernel || y>=ySize-state->hwKernel)
+            state->mRData[x+xSize*y] = cMask[x+xSize*y] | FLAG_OUTPUT_ISBAD;
     nsteps_x = ceil((double)(xSize)/(double)state->kcStep);
     nsteps_y = ceil((double)(ySize)/(double)state->kcStep);
     
@@ -1356,26 +1398,14 @@ int ludcmp(double **a, int n, int *indx, double *d)
     void    lnrerror();
     
     vv=(double *)malloc((n+1)*sizeof(double));
+    if (!vv) return -1;
     
     *d=1.0;
     for (i=1;i<=n;i++) {
         big=0.0;
         for (j=1;j<=n;j++)
             if ((temp2=fabs(a[i][j])) > big) big=temp2;
-        if (big == 0.) {
-            fprintf(stderr," Numerical Recipies run error....");
-            fprintf(stderr,"Singular matrix in routine LUDCMP\n");
-            fprintf(stderr,"Goodbye ! \n");
-            
-            /*
-              for (i = 1; i <= n; i++) {
-              for (j = 1; j <= n; j++) {
-              fprintf(stderr, "%d %d %f\n", i, j, a[i][j]);
-              }
-              }
-            */
-            return (1);
-        }
+        if (!isfinite(big) || big == 0.) { free(vv); return 1; }
         vv[i]=1.0/big;
     }
     for (j=1;j<=n;j++) {
@@ -1405,7 +1435,7 @@ int ludcmp(double **a, int n, int *indx, double *d)
             vv[imax]=vv[j];
         }
         indx[j]=imax;
-        if (a[j][j] == 0.0) a[j][j]=TINY;
+        if (!isfinite(a[j][j]) || a[j][j] == 0.0) { free(vv); return 1; }
         if (j != n) {
             dum=1.0/(a[j][j]);
             for (i=j+1;i<=n;i++) a[i][j] *= dum;

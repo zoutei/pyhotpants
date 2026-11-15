@@ -10,10 +10,13 @@ fine-grained control.
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Any, Union
 import warnings
+import copy
+import os
+import numbers
 from astropy.io import fits
 import getpass
 import socket
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .config import HotpantsConfig
 from .models import Substamp, SubstampStatus
@@ -38,7 +41,7 @@ def _get_ext():
     return hotpants_ext
 
 
-__version__ = "0.2.0"
+__version__ = "0.3.0rc1"
 
 
 class HotpantsError(Exception):
@@ -80,7 +83,7 @@ class Hotpants:
         config: Optional[HotpantsConfig] = None,
         output_header: Optional[fits.Header] = None,
         use_c_extension: bool = True,
-        oversample: int = 1, # Feature: High-Res Template
+        oversample: int = 1,  # Feature: High-Res Template
     ):
         """
         Initializes the Hotpants object and performs pre-processing.
@@ -110,25 +113,33 @@ class Hotpants:
             use_c_extension: boolean to use C extension or pure python
         """
         self.use_c_extension = use_c_extension
+        if (
+            isinstance(oversample, bool)
+            or not isinstance(oversample, numbers.Integral)
+            or oversample < 1
+        ):
+            raise ValueError("oversample must be a positive integer")
         self.oversample = int(oversample)
 
         if self.use_c_extension:
             self.ext = _get_ext()
             if self.oversample > 1:
-                 raise NotImplementedError("Oversampled templates are only supported in Pure Python mode currently.")
+                raise NotImplementedError(
+                    "Oversampled templates are only supported in Pure Python mode currently."
+                )
         else:
             self.ext = None
-            
+
         self.output_header = output_header
 
-        if isinstance(template_data, str):
+        if isinstance(template_data, (str, os.PathLike)):
             self.template_path = template_data
             template_data, self.template_header = self._load_fits(template_data)
         else:
             self.template_path = "in-memory"
             self.template_header = None
 
-        if isinstance(image_data, str):
+        if isinstance(image_data, (str, os.PathLike)):
             self.image_path = image_data
             image_data, self.image_header = self._load_fits(image_data)
             if self.output_header is None:
@@ -137,29 +148,38 @@ class Hotpants:
             self.image_path = "in-memory"
             self.image_header = None
 
+        template_data = np.asarray(template_data)
+        image_data = np.asarray(image_data)
         if self.oversample == 1:
             self._validate_images(template_data, image_data, "template and image")
         else:
             if template_data.ndim != 2 or image_data.ndim != 2:
-                 raise HotpantsError("template and image must be 2D arrays")
-            
+                raise HotpantsError("template and image must be 2D arrays")
+
             # Strict dimension check for oversampled templates
-            expected_shape = (image_data.shape[0] * self.oversample, image_data.shape[1] * self.oversample)
+            expected_shape = (
+                image_data.shape[0] * self.oversample,
+                image_data.shape[1] * self.oversample,
+            )
             if template_data.shape != expected_shape:
                 raise HotpantsError(
                     f"Template shape {template_data.shape} does not match "
                     f"Science shape {image_data.shape} * oversample {self.oversample} = {expected_shape}"
                 )
 
-        self.template_data = np.ascontiguousarray(template_data, dtype=np.float32)
-        self.image_data = np.ascontiguousarray(image_data, dtype=np.float32)
+        self.template_data = np.array(
+            template_data, dtype=np.float32, order="C", copy=True
+        )
+        self.image_data = np.array(image_data, dtype=np.float32, order="C", copy=True)
         # Template (possibly HR) dims; science dims are always LR.
         self.ny, self.nx = self.template_data.shape
         self.ny_lr, self.nx_lr = self.image_data.shape
 
         # Oversampled mode only supports convolving the template → science.
         if self.oversample > 1:
-            fc = str(getattr(config, "force_convolve", "b") if config is not None else "b")
+            fc = str(
+                getattr(config, "force_convolve", "b") if config is not None else "b"
+            )
             if fc == "i":
                 raise HotpantsError(
                     "oversample>1 only supports convolving the template (force_convolve='t'); "
@@ -167,11 +187,20 @@ class Hotpants:
                 )
 
         # Size stamp grid / fwstamp from science (LR) pixels, not HR template pixels.
-        self.config = config if config is not None else HotpantsConfig(nx=self.nx_lr, ny=self.ny_lr)
+        self.config = (
+            copy.deepcopy(config)
+            if config is not None
+            else HotpantsConfig(nx=self.nx_lr, ny=self.ny_lr)
+        )
+        self.config.validate()
+        if self.use_c_extension and self.config.lambda_reg:
+            raise HotpantsError("lambda_reg requires the pure Python backend")
         if self.oversample > 1:
             if self.config.force_convolve in ("b", "i"):
                 if self.config.verbose >= 1 and self.config.force_convolve == "b":
-                    print("oversample>1: forcing conv_direction='t' (image→template not supported).")
+                    print(
+                        "oversample>1: forcing conv_direction='t' (image→template not supported)."
+                    )
                 self.config.force_convolve = "t"
         # Always recompute fwstamp from LR dims (HotpantsConfig defaults assume 2048²).
         fwstamp_est = min(
@@ -180,7 +209,23 @@ class Hotpants:
         )
         fwstamp_est -= self.config.fwkernel
         fwstamp_est -= 1 if int(fwstamp_est) % 2 == 0 else 0
-        self.config.fwstamp = int(max(fwstamp_est, self.config.fwksstamp + self.config.fwkernel))
+        self.config.fwstamp = int(
+            max(fwstamp_est, self.config.fwksstamp + self.config.fwkernel)
+        )
+
+        # Pedestals are subtracted before thresholding/noise estimation, as in HOTPANTS.
+        for side, data in (("t", self.template_data), ("i", self.image_data)):
+            pedestal = getattr(self.config, side + "pedestal")
+            if pedestal:
+                corrected = np.ascontiguousarray(data - pedestal, dtype=np.float32)
+                if side == "t":
+                    self.template_data = corrected
+                else:
+                    self.image_data = corrected
+                for suffix in ("uthresh", "uktresh", "lthresh"):
+                    key = side + suffix
+                    if getattr(self.config, key) is not None:
+                        setattr(self.config, key, getattr(self.config, key) - pedestal)
 
         if t_error is not None:
             t_error_arr = np.asarray(t_error)
@@ -215,9 +260,19 @@ class Hotpants:
         self._i_nan_mask = np.isnan(self.image_data)
 
         if star_catalog is not None:
-            if not isinstance(star_catalog, np.ndarray) or star_catalog.ndim != 2 or star_catalog.shape[1] != 2:
-                raise HotpantsError("star_catalog must be a 2D NumPy array with shape (N, 2).")
+            if (
+                not isinstance(star_catalog, np.ndarray)
+                or star_catalog.ndim != 2
+                or star_catalog.shape[1] != 2
+            ):
+                raise HotpantsError(
+                    "star_catalog must be a 2D NumPy array with shape (N, 2)."
+                )
+            if not np.all(np.isfinite(star_catalog)):
+                raise HotpantsError("star_catalog coordinates must be finite")
             self.star_catalog = np.ascontiguousarray(star_catalog, dtype=np.float32) - 1
+            if not np.all(np.isfinite(self.star_catalog)):
+                raise HotpantsError("star_catalog coordinates exceed float32 range")
         else:
             self.star_catalog = None
 
@@ -240,24 +295,39 @@ class Hotpants:
         self._cached_kernel_basis_scale = None
         self._cached_basis_lr_maps = None
         self._fom_stamps_by_region: Dict[int, Any] = {}
+        self._fom_stamps_by_direction: Dict[str, Dict[int, Any]] = {}
+
+        if not np.any(np.isfinite(self.template_data)) or not np.any(
+            np.isfinite(self.image_data)
+        ):
+            raise HotpantsError("images must contain finite pixels")
 
         # Dynamically set thresholds if not provided (nan-aware for masked JWST/FITS data)
         if self.config.tuthresh is None:
-            self.config.tuthresh = np.nanmax(self.template_data)
+            self.config.tuthresh = np.max(
+                self.template_data[np.isfinite(self.template_data)]
+            )
         if self.config.tuktresh is None:
             self.config.tuktresh = self.config.tuthresh
         if self.config.tlthresh is None:
-            self.config.tlthresh = np.nanmin(self.template_data)
+            self.config.tlthresh = np.min(
+                self.template_data[np.isfinite(self.template_data)]
+            )
         if self.config.iuthresh is None:
-            self.config.iuthresh = np.nanmax(self.image_data)
+            self.config.iuthresh = np.max(self.image_data[np.isfinite(self.image_data)])
         if self.config.iuktresh is None:
             self.config.iuktresh = self.config.iuthresh
         if self.config.ilthresh is None:
-            self.config.ilthresh = np.nanmin(self.image_data)
+            self.config.ilthresh = np.min(self.image_data[np.isfinite(self.image_data)])
+
+        self.config.validate()
+        self._config_snapshot = copy.deepcopy(self.config.to_dict())
 
         # Initialize C state object and pre-compute masks and noise images
         if self.use_c_extension:
-            self._c_state = self.ext.HotpantsState(self.nx, self.ny, self.config.to_dict())
+            self._c_state = self.ext.HotpantsState(
+                self.nx, self.ny, self.config.to_dict()
+            )
             if self.config.verbose >= 1:
                 print(f"Initialized HOTPANTS state: {self._c_state}")
         else:
@@ -268,8 +338,11 @@ class Hotpants:
         # 1. Create the initial input mask (int32 bitflags; HR when oversample>1).
         if self.use_c_extension:
             input_mask = self.ext.make_input_mask(
-                self._c_state, self.template_data, self.image_data,
-                self._t_mask_input, self._i_mask_input,
+                self._c_state,
+                self.template_data,
+                self.image_data,
+                self._t_mask_input,
+                self._i_mask_input,
             )
             input_mask_lr = input_mask
         else:
@@ -282,12 +355,16 @@ class Hotpants:
                 oversample=self.oversample,
             )
             if self.oversample > 1:
-                input_mask_lr = pure.utils.downsample_hr_mask_to_lr(input_mask, self.oversample)
+                input_mask_lr = pure.utils.downsample_hr_mask_to_lr(
+                    input_mask, self.oversample
+                )
             else:
                 input_mask_lr = input_mask
 
         if self.config.verbose >= 1:
-            print(f"Input mask created with shape: {input_mask.shape}, dtype: {input_mask.dtype}")
+            print(
+                f"Input mask created with shape: {input_mask.shape}, dtype: {input_mask.dtype}"
+            )
         self.results["input_mask"] = input_mask
         self.results["input_mask_lr"] = input_mask_lr
 
@@ -298,11 +375,13 @@ class Hotpants:
         else:
             # Generate noise image from scratch and square it.
             if self.use_c_extension:
-                t_noise_sq = self.ext.calculate_noise_image(self._c_state, self.template_data, True)
+                t_noise_sq = self.ext.calculate_noise_image(
+                    self._c_state, self.template_data, True
+                )
             else:
                 rn = self.config.trdnoise
                 gain = self.config.tgain
-                t_noise_sq = (rn / gain)**2 + np.abs(self.template_data) / gain
+                t_noise_sq = (rn / gain) ** 2 + np.abs(self.template_data) / gain
 
         if self._i_error_input is not None:
             # Use user-provided noise image, squared.
@@ -310,11 +389,13 @@ class Hotpants:
         else:
             # Generate noise image from scratch and square it.
             if self.use_c_extension:
-                i_noise_sq = self.ext.calculate_noise_image(self._c_state, self.image_data, False)
+                i_noise_sq = self.ext.calculate_noise_image(
+                    self._c_state, self.image_data, False
+                )
             else:
                 rn = self.config.irdnoise
                 gain = self.config.igain
-                i_noise_sq = (rn / gain)**2 + np.abs(self.image_data) / gain
+                i_noise_sq = (rn / gain) ** 2 + np.abs(self.image_data) / gain
 
         # 3. Store the squared noise images for later use.
         self.results["t_noise_sq"] = t_noise_sq
@@ -354,13 +435,15 @@ class Hotpants:
 
     def _validate_images(self, a1: np.ndarray, a2: np.ndarray, names: str):
         """Checks if two arrays are 2D and have the same shape."""
-        if a1.ndim != 2 or a2.ndim != 2:
+        if a1.ndim != 2 or a2.ndim != 2 or not a1.size or not a2.size:
             raise HotpantsError(f"{names} must be 2D arrays")
         if a1.shape != a2.shape:
             raise HotpantsError(f"{names} must have the same dimensions")
 
     def _validate_aux_array(self, arr: np.ndarray, name: str):
         """Checks if an auxiliary array matches the image shape."""
+        if name.endswith("error") and (not np.all(np.isfinite(arr)) or np.any(arr < 0)):
+            raise HotpantsError(f"{name} must contain finite nonnegative uncertainties")
         if arr.ndim != 2:
             raise HotpantsError(f"{name} must be a 2D array")
         if self.oversample == 1:
@@ -373,10 +456,34 @@ class Hotpants:
         if arr.shape != expected:
             raise HotpantsError(f"{name} must have shape {expected}")
 
+    def _check_config(self):
+        """A fitted object's numerical configuration is a snapshot."""
+        current = self.config.to_dict()
+        ignored = {
+            "output_file",
+            "noise_image_file",
+            "mask_image_file",
+            "convolved_image_file",
+            "sigma_image_file",
+            "stamp_region_file",
+            "verbose",
+        }
+        if any(
+            current.get(k) != v
+            for k, v in self._config_snapshot.items()
+            if k not in ignored
+        ):
+            raise HotpantsError(
+                "Numerical configuration changed after construction; create a new Hotpants object"
+            )
+
     def _ensure_kernel_basis(self, scale: int):
         """Return cached kernel basis list for the given oversample scale."""
         scale = int(scale)
-        if self._cached_kernel_basis is not None and self._cached_kernel_basis_scale == scale:
+        if (
+            self._cached_kernel_basis is not None
+            and self._cached_kernel_basis_scale == scale
+        ):
             return self._cached_kernel_basis
         hr_rkernel = self.config.rkernel * scale
         k_size = 2 * hr_rkernel + 1
@@ -385,7 +492,7 @@ class Hotpants:
         # oversample F, so coeffs scale as 1/F^2 (NOT *F). Scaling by F
         # made OS>=4 bases far too sharp and produced ring residuals.
         if scale > 1:
-            scaled_sigmas = [s / (scale ** 2) for s in self.config.sigma_gauss]
+            scaled_sigmas = [s / (scale**2) for s in self.config.sigma_gauss]
         else:
             scaled_sigmas = list(self.config.sigma_gauss)
         basis = pure.kernel.calculate_kernel_basis(
@@ -403,7 +510,10 @@ class Hotpants:
         scale = int(scale)
         if scale <= 1:
             return None
-        if self._cached_basis_lr_maps is not None and self._cached_kernel_basis_scale == scale:
+        if (
+            self._cached_basis_lr_maps is not None
+            and self._cached_kernel_basis_scale == scale
+        ):
             return self._cached_basis_lr_maps
         import time as _time
 
@@ -443,12 +553,36 @@ class Hotpants:
             A tuple containing two lists: the `Substamp` objects found on the
             template and the `Substamp` objects found on the science image.
         """
+        self._check_config()
+        for key in (
+            "kernel_solution",
+            "conv_direction",
+            "final_fits",
+            "fit_stats",
+            "diff_image",
+            "convolved_image",
+            "background",
+            "output_mask",
+            "noise_image",
+            "stats",
+            "region_map",
+        ):
+            self.results.pop(key, None)
+        self._fom_stamps_by_region.clear()
+        self._fom_stamps_by_direction.clear()
+        for key in ("input_mask", "input_mask_lr"):
+            self.results[key] &= ~(pure.utils.FLAG_T_SKIP | pure.utils.FLAG_I_SKIP)
         if self.use_c_extension:
             t_substamps_coords, i_substamps_coords = self.ext.find_stamps(
-                self._c_state, self.template_data, self.image_data,
-                self.config.fitthresh, self.star_catalog,
+                self._c_state,
+                self.template_data,
+                self.image_data,
+                self.config.fitthresh,
+                self.star_catalog,
             )
-            self.template_substamps = [Substamp(**coords) for coords in t_substamps_coords]
+            self.template_substamps = [
+                Substamp(**coords) for coords in t_substamps_coords
+            ]
             self.image_substamps = [Substamp(**coords) for coords in i_substamps_coords]
         elif str(getattr(self.config, "stamp_mode", "grid")) == "connected_regions":
             # Connected irregular stamps from gated catalog (pure Python only).
@@ -512,14 +646,19 @@ class Hotpants:
 
             # Template search always in LR coords (downsample HR template when F>1).
             if self.oversample > 1:
-                t_search = pure.utils.downsample_image(self.template_data, self.oversample)
+                t_search = pure.utils.downsample_image(
+                    self.template_data, self.oversample
+                )
                 t_mask_for_search = mask_lr
             else:
                 t_search = self.template_data
                 t_mask_for_search = self.results["input_mask"]
 
             t_stamps_found = pure.utils.find_stamps(
-                t_search, t_mask_for_search, n_want, box,
+                t_search,
+                t_mask_for_search,
+                n_want,
+                box,
             )
             self.template_substamps = [
                 Substamp(substamp_id=i, x=c["x"], y=c["y"], stamp_group_id=i)
@@ -531,13 +670,18 @@ class Hotpants:
                 self.image_substamps = []
             else:
                 i_stamps_found = pure.utils.find_stamps(
-                    self.image_data, mask_lr, n_want, box,
+                    self.image_data,
+                    mask_lr,
+                    n_want,
+                    box,
                 )
                 n_t = len(self.template_substamps)
                 self.image_substamps = [
                     Substamp(
                         substamp_id=i + n_t,
-                        x=c["x"], y=c["y"], stamp_group_id=i + n_t,
+                        x=c["x"],
+                        y=c["y"],
+                        stamp_group_id=i + n_t,
                     )
                     for i, c in enumerate(i_stamps_found)
                 ]
@@ -550,10 +694,14 @@ class Hotpants:
 
         if self.config.force_convolve == "t":
             if not self.template_substamps:
-                raise HotpantsError("No valid template substamps found for kernel fitting.")
+                raise HotpantsError(
+                    "No valid template substamps found for kernel fitting."
+                )
         elif self.config.force_convolve == "i":
             if not self.image_substamps:
-                raise HotpantsError("No valid image substamps found for kernel fitting.")
+                raise HotpantsError(
+                    "No valid image substamps found for kernel fitting."
+                )
         elif not self.template_substamps and not self.image_substamps:
             raise HotpantsError("No valid substamps found for kernel fitting.")
 
@@ -576,9 +724,10 @@ class Hotpants:
         Returns:
             The selected convolution direction, either 't' (template) or 'i' (image).
         """
+        self._check_config()
         if not self.template_substamps and not self.image_substamps:
             self.find_stamps()
- 
+
         t_fom, i_fom = float("inf"), float("inf")
         t_fit_results, i_fit_results = [], []
         conv_direction = self.config.force_convolve
@@ -586,14 +735,29 @@ class Hotpants:
         # Create maps for easy lookup of substamp objects by their unique ID
         # Calculate combined error map for weighting (mostly for C extension)
         # In Pure Python, fit_stamps_locally handles its own noise/weighting or ignores it for now.
-        
+
         t_substamp_map = {s.id: s for s in self.template_substamps}
         if self.use_c_extension:
             combined_error_sq = self.results["t_noise_sq"] + self.results["i_noise_sq"]
-            
-            t_coords = [{"substamp_id": s.id, "stamp_group_id": s.stamp_group_id, "x": s.x, "y": s.y} for s in self.template_substamps]
+
+            t_coords = [
+                {
+                    "substamp_id": s.id,
+                    "stamp_group_id": s.stamp_group_id,
+                    "x": s.x,
+                    "y": s.y,
+                }
+                for s in self.template_substamps
+            ]
             # Calls C extension's fit_stamps_and_get_fom - NO OVERSAMPLE ARG
-            t_fom, t_fit_results = self.ext.fit_stamps_and_get_fom(self._c_state, self.template_data, self.image_data, combined_error_sq, "t", t_coords)
+            t_fom, t_fit_results = self.ext.fit_stamps_and_get_fom(
+                self._c_state,
+                self.template_data,
+                self.image_data,
+                combined_error_sq,
+                "t",
+                t_coords,
+            )
 
             # Populate substamp objects with the complete, isolated results from the C extension
             for result in t_fit_results:
@@ -605,13 +769,31 @@ class Hotpants:
                     substamp.basis_vectors = result["basis_vectors"]
                     substamp.local_kernel_solution = result["local_solution"]
                     substamp.convolved_model_local = result["convolved_model_local"]
-                    substamp.fit_results["t"] = {"fom": result["fom"], "chi2": result["chi2"]}
-            
+                    substamp.fit_results["t"] = {
+                        "fom": result["fom"],
+                        "chi2": result["chi2"],
+                    }
+
             # Direction 'i'
             i_substamp_map = {s.id: s for s in self.image_substamps}
-            i_coords = [{"substamp_id": s.id, "stamp_group_id": s.stamp_group_id, "x": s.x, "y": s.y} for s in self.image_substamps]
+            i_coords = [
+                {
+                    "substamp_id": s.id,
+                    "stamp_group_id": s.stamp_group_id,
+                    "x": s.x,
+                    "y": s.y,
+                }
+                for s in self.image_substamps
+            ]
             # Calls C extension's fit_stamps_and_get_fom - NO OVERSAMPLE ARG
-            i_fom, i_fit_results = self.ext.fit_stamps_and_get_fom(self._c_state, self.image_data, self.template_data, combined_error_sq, "i", i_coords)
+            i_fom, i_fit_results = self.ext.fit_stamps_and_get_fom(
+                self._c_state,
+                self.image_data,
+                self.template_data,
+                combined_error_sq,
+                "i",
+                i_coords,
+            )
 
             # Populate substamp objects with the complete, isolated results from the C extension
             for result in i_fit_results:
@@ -623,7 +805,10 @@ class Hotpants:
                     substamp.basis_vectors = result["basis_vectors"]
                     substamp.local_kernel_solution = result["local_solution"]
                     substamp.convolved_model_local = result["convolved_model_local"]
-                    substamp.fit_results["i"] = {"fom": result["fom"], "chi2": result["chi2"]}
+                    substamp.fit_results["i"] = {
+                        "fom": result["fom"],
+                        "chi2": result["chi2"],
+                    }
         else:
             # Pure Python Implementation
             # 1. Generate Basis Vectors (Global Config) — cached; OS>1 precomputes LR maps
@@ -637,7 +822,9 @@ class Hotpants:
                 # Template→image direction uses HR template
                 basis_lr = self._ensure_basis_lr_maps(self.template_data, scale)
 
-            def _fom_by_stamp_group(substamps, conv_img, ref_img, direction, oversample_param):
+            def _fom_by_stamp_group(
+                substamps, conv_img, ref_img, direction, oversample_param
+            ):
                 """
                 Match C check_stamps: one local ksum test per stamp_group (sscnt=0),
                 then apply survived_check to every substamp in that group.
@@ -670,7 +857,7 @@ class Hotpants:
                 }
                 # Stash filled FOM stamps for iterative fit reuse (copy, not shared)
                 if region_map is not None:
-                    self._fom_stamps_by_region = {
+                    self._fom_stamps_by_direction[direction] = {
                         rid: s for rid, s in fit_by_region.items() if not s.ignore
                     }
                 survivors = []
@@ -694,7 +881,9 @@ class Hotpants:
                             substamp.template_cutout = stamp_res.template_cutout
                             substamp.basis_vectors = stamp_res.basis_vectors
                             substamp.local_kernel_solution = stamp_res.local_solution
-                            substamp.convolved_model_local = stamp_res.convolved_model_local
+                            substamp.convolved_model_local = (
+                                stamp_res.convolved_model_local
+                            )
                             substamp.fit_results[direction] = {
                                 "fom": float(stamp_res.diff),
                                 "chi2": float(stamp_res.chi2),
@@ -733,7 +922,9 @@ class Hotpants:
                 )
 
             # Image→template direction is unsupported when oversample>1 (forced to 't' at init).
-            if self.oversample == 1 and (conv_direction == "i" or conv_direction == "b"):
+            if self.oversample == 1 and (
+                conv_direction == "i" or conv_direction == "b"
+            ):
                 i_fom = _fom_by_stamp_group(
                     self.image_substamps,
                     self.image_data,
@@ -742,13 +933,17 @@ class Hotpants:
                     1,
                 )
 
-            self.results.setdefault("stage_timings", {})["fom"] = _time.perf_counter() - t_fom0
+            self.results.setdefault("stage_timings", {})["fom"] = (
+                _time.perf_counter() - t_fom0
+            )
 
         # Select best direction
         if conv_direction == "b":
             conv_direction = "t" if t_fom < i_fom else "i"
             if self.config.verbose >= 1:
-                print(f"Template FOM: {t_fom:.3f}, Image FOM: {i_fom:.3f}. Selecting direction: '{conv_direction}'")
+                print(
+                    f"Template FOM: {t_fom:.3f}, Image FOM: {i_fom:.3f}. Selecting direction: '{conv_direction}'"
+                )
 
         # Update status based on the winning direction
         if conv_direction == "t":
@@ -756,7 +951,11 @@ class Hotpants:
                 for result in t_fit_results:
                     substamp = t_substamp_map.get(result["substamp_id"])
                     if substamp:
-                        substamp.status = SubstampStatus.PASSED_FOM_CHECK if result["survived_check"] else SubstampStatus.REJECTED_FOM_CHECK
+                        substamp.status = (
+                            SubstampStatus.PASSED_FOM_CHECK
+                            if result["survived_check"]
+                            else SubstampStatus.REJECTED_FOM_CHECK
+                        )
             else:
                 for s in self.template_substamps:
                     fr = s.fit_results.get("t")
@@ -769,7 +968,11 @@ class Hotpants:
                 for result in i_fit_results:
                     substamp = i_substamp_map.get(result["substamp_id"])
                     if substamp:
-                        substamp.status = SubstampStatus.PASSED_FOM_CHECK if result["survived_check"] else SubstampStatus.REJECTED_FOM_CHECK
+                        substamp.status = (
+                            SubstampStatus.PASSED_FOM_CHECK
+                            if result["survived_check"]
+                            else SubstampStatus.REJECTED_FOM_CHECK
+                        )
             else:
                 for s in self.image_substamps:
                     fr = s.fit_results.get("i")
@@ -778,6 +981,9 @@ class Hotpants:
                     else:
                         s.status = SubstampStatus.REJECTED_FOM_CHECK
 
+        self._fom_stamps_by_region = self._fom_stamps_by_direction.get(
+            conv_direction, {}
+        )
         self.results["conv_direction"] = conv_direction
         return conv_direction
 
@@ -797,20 +1003,29 @@ class Hotpants:
             - A list of the `Substamp` objects that survived the clipping and
               were used in the final fit.
         """
+        self._check_config()
         if "conv_direction" not in self.results:
             self.fit_and_select_direction()
         if self.config.verbose >= 1:
             print("Starting iterative kernel fit and solution...")
 
         conv_direction = self.results["conv_direction"]
-        candidate_substamps = self.template_substamps if conv_direction == "t" else self.image_substamps
-        
-        passed_fom = [s for s in candidate_substamps if s.status == SubstampStatus.PASSED_FOM_CHECK]
+        candidate_substamps = (
+            self.template_substamps if conv_direction == "t" else self.image_substamps
+        )
+
+        passed_fom = [
+            s
+            for s in candidate_substamps
+            if s.status == SubstampStatus.PASSED_FOM_CHECK
+        ]
         if self.config.verbose >= 1:
-            print(f"DEBUG: iterative_fit. Direction={conv_direction}. Candidates passing FOM: {len(passed_fom)}/{len(candidate_substamps)}")
+            print(
+                f"DEBUG: iterative_fit. Direction={conv_direction}. Candidates passing FOM: {len(passed_fom)}/{len(candidate_substamps)}"
+            )
             if len(passed_fom) > 0:
-                 print(f"DEBUG: Sample Chi2: {getattr(passed_fom[0], 'chi2', 'N/A')}")
-        
+                print(f"DEBUG: Sample Chi2: {getattr(passed_fom[0], 'chi2', 'N/A')}")
+
         # Create a list of stamps for the C function, grouping substamps by group_id
 
         stamps_for_fit = []
@@ -825,8 +1040,12 @@ class Hotpants:
         candidate_stamps_in_order = []
         for group_id in sorted(substamp_map.keys()):
             substamps_in_group = substamp_map[group_id]
-            stamps_for_fit.append({"substamps": [(s.x, s.y) for s in substamps_in_group]})
-            candidate_stamps_in_order.append(substamps_in_group[0])  # Representative stamp
+            stamps_for_fit.append(
+                {"substamps": [(s.x, s.y) for s in substamps_in_group]}
+            )
+            candidate_stamps_in_order.append(
+                substamps_in_group[0]
+            )  # Representative stamp
 
         if not stamps_for_fit:
             raise HotpantsError("No substamps passed the initial FOM check.")
@@ -837,14 +1056,32 @@ class Hotpants:
             else:
                 conv_img, ref_img = self.image_data, self.template_data
 
-            kernel_solution, stats, final_survivor_indices = self.ext.fit_kernel(self._c_state, stamps_for_fit, conv_img, ref_img, self.results["t_noise_sq"] + self.results["i_noise_sq"])
+            kernel_solution, stats, final_survivor_indices = self.ext.fit_kernel(
+                self._c_state,
+                stamps_for_fit,
+                conv_img,
+                ref_img,
+                self.results["t_noise_sq"] + self.results["i_noise_sq"],
+            )
 
             final_fits_substamps = []
-            survivor_group_ids = {candidate_stamps_in_order[i].stamp_group_id for i in final_survivor_indices}
+            survivor_group_ids = {
+                candidate_stamps_in_order[i].stamp_group_id
+                for i in final_survivor_indices
+            }
+            selected = {
+                candidate_stamps_in_order[i].stamp_group_id: stamps_for_fit[i][
+                    "substamps"
+                ][stats["active_substamp_indices"][i]]
+                for i in final_survivor_indices
+            }
 
             for s in candidate_substamps:
                 if s.status == SubstampStatus.PASSED_FOM_CHECK:
-                    if s.stamp_group_id in survivor_group_ids:
+                    if (
+                        s.stamp_group_id in survivor_group_ids
+                        and (s.x, s.y) == selected[s.stamp_group_id]
+                    ):
                         s.status = SubstampStatus.USED_IN_FINAL_FIT
                         final_fits_substamps.append(s)
                     else:
@@ -853,7 +1090,9 @@ class Hotpants:
             if not final_fits_substamps:
                 raise HotpantsError("All stamps were clipped during iterative fitting.")
             if self.config.verbose >= 1:
-                print(f"Final fit uses {len(final_survivor_indices)} stamp groups. Fit stats: mean_sig={stats['meansig']:.3f}, scatter={stats['scatter']:.3f}")
+                print(
+                    f"Final fit uses {len(final_survivor_indices)} stamp groups. Fit stats: mean_sig={stats['meansig']:.3f}, scatter={stats['scatter']:.3f}"
+                )
 
             self.results["kernel_solution"] = kernel_solution
             self.results["final_fits"] = final_fits_substamps
@@ -865,12 +1104,14 @@ class Hotpants:
             import time as _time
 
             t_fit0 = _time.perf_counter()
-            oversample_param = self.oversample if conv_direction == 't' else 1
+            oversample_param = self.oversample if conv_direction == "t" else 1
 
             basis_funcs = self._ensure_kernel_basis(oversample_param)
             basis_lr = None
             if oversample_param > 1 and conv_direction == "t":
-                basis_lr = self._ensure_basis_lr_maps(self.template_data, oversample_param)
+                basis_lr = self._ensure_basis_lr_maps(
+                    self.template_data, oversample_param
+                )
 
             # Groups of FOM survivors (ordered like C fit_kernel stamps_for_fit)
             stamp_groups = []
@@ -908,11 +1149,15 @@ class Hotpants:
             )
 
             if kernel_sol is None:
-                raise HotpantsError("Kernel fit failed (singular matrix or other error).")
+                raise HotpantsError(
+                    "Kernel fit failed (singular matrix or other error)."
+                )
 
             self.results["kernel_solution"] = kernel_sol
             if active_internal_stamps:
-                self.results["fit_stats"] = getattr(active_internal_stamps[0], "fit_stats", None)
+                self.results["fit_stats"] = getattr(
+                    active_internal_stamps[0], "fit_stats", None
+                )
 
             # Survivors: groups that still have a valid active substamp
             survivor_group_ids = set()
@@ -957,19 +1202,32 @@ class Hotpants:
                 for s in group:
                     if s is used:
                         s.status = SubstampStatus.USED_IN_FINAL_FIT
-                        s.convolved_model_global = getattr(internal, "convolved_model_global", None)
-                        s.convolved_model_local = getattr(internal, "convolved_model_local", None)
-                        s.local_kernel_solution = getattr(internal, "local_solution", None)
+                        s.convolved_model_global = getattr(
+                            internal, "convolved_model_global", None
+                        )
+                        s.convolved_model_local = getattr(
+                            internal, "convolved_model_local", None
+                        )
+                        s.local_kernel_solution = getattr(
+                            internal, "local_solution", None
+                        )
                         valid_list.append(s)
                     elif s.status == SubstampStatus.PASSED_FOM_CHECK:
                         s.status = SubstampStatus.REJECTED_ITERATIVE_FIT
 
             if self.config.verbose >= 1:
-                print(f"Iterative fit selected {len(valid_list)} substamps for final kernel solution.")
+                print(
+                    f"Iterative fit selected {len(valid_list)} substamps for final kernel solution."
+                )
 
+            if not valid_list:
+                raise HotpantsError("All stamps were rejected during iterative fitting")
+            self.results["final_fits"] = valid_list
             return kernel_sol, valid_list
 
-    def convolve_and_difference(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def convolve_and_difference(
+        self,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Step 4: Applies the kernel, performs subtraction, and creates final images.
 
@@ -985,6 +1243,7 @@ class Hotpants:
             - noise_image (np.ndarray): The final 1-sigma noise map for the difference image.
             - output_mask (np.ndarray): The final integer mask indicating bad pixels.
         """
+        self._check_config()
         if "kernel_solution" not in self.results:
             self.iterative_fit_and_clip()
 
@@ -1011,22 +1270,36 @@ class Hotpants:
             mask = np.zeros(image_to_convolve.shape, dtype=np.int32)
 
         if self.use_c_extension:
-            convolved_image, output_mask, conv_noise_sq = self.ext.apply_kernel(self._c_state, image_to_convolve, self.results["kernel_solution"], noise_to_convolve_sq)
-            bkg = self.ext.get_background_image(self._c_state, self.results["kernel_solution"])
+            convolved_image, output_mask, conv_noise_sq = self.ext.apply_kernel(
+                self._c_state,
+                image_to_convolve,
+                self.results["kernel_solution"],
+                noise_to_convolve_sq,
+            )
+            bkg = self.ext.get_background_image(
+                self._c_state, self.results["kernel_solution"]
+            )
         else:
             # Pure Python Convolution — reuse cached basis
             import time as _time
 
             t_app0 = _time.perf_counter()
-            oversample_param = self.oversample if self.results["conv_direction"] == 't' else 1
+            oversample_param = (
+                self.oversample if self.results["conv_direction"] == "t" else 1
+            )
             basis_funcs = self._ensure_kernel_basis(oversample_param)
             basis_vecs = np.array(basis_funcs)
 
-            convolved_image, bkg, conv_noise_sq, output_mask_conv = pure.convolution.apply_kernel(
-                image_to_convolve, self.results["kernel_solution"],
-                noise_to_convolve_sq, mask,
-                self.config, basis_vecs,
-                oversample=oversample_param
+            convolved_image, bkg, conv_noise_sq, output_mask_conv = (
+                pure.convolution.apply_kernel(
+                    image_to_convolve,
+                    self.results["kernel_solution"],
+                    noise_to_convolve_sq,
+                    mask,
+                    self.config,
+                    basis_vecs,
+                    oversample=oversample_param,
+                )
             )
 
             output_mask = output_mask_conv
@@ -1037,17 +1310,62 @@ class Hotpants:
         convolved_image += bkg
 
         diff_image = target_image - convolved_image
-        final_noise = np.sqrt(conv_noise_sq + target_noise_sq)
+        variance = conv_noise_sq + target_noise_sq
+        invalid = ~np.isfinite(variance) | (variance < 0) | ~np.isfinite(diff_image)
+        output_mask[invalid] |= pure.utils.FLAG_OUTPUT_ISBAD
+        final_noise = np.sqrt(np.where(invalid, np.nan, variance))
 
         if self.config.rescale_ok:
             if self.config.verbose >= 1:
                 print("Rescaling noise for OK pixels...")
             if self.use_c_extension:
-                final_noise = self.ext.rescale_noise_ok(self._c_state, diff_image, final_noise, output_mask)
+                final_noise = self.ext.rescale_noise_ok(
+                    self._c_state, diff_image, final_noise, output_mask
+                )
             else:
-                warnings.warn("rescale_ok is currently only implemented for the C extension path.")
+                from .pure.fitting import _sigma_clip_mean_stdev
 
-        self.results.update({"convolved_image": convolved_image, "background": bkg, "output_mask": output_mask, "diff_image": diff_image, "noise_image": final_noise})
+                good = (
+                    ((output_mask & pure.utils.FLAG_OUTPUT_ISBAD) == 0)
+                    & np.isfinite(diff_image)
+                    & np.isfinite(final_noise)
+                    & (final_noise > 0)
+                )
+                if np.count_nonzero(good) < 2:
+                    raise HotpantsError("insufficient valid pixels for noise rescaling")
+                _, sd = _sigma_clip_mean_stdev(
+                    diff_image[good], self.config.stat_sig, 5
+                )
+                mean, _ = _sigma_clip_mean_stdev(
+                    final_noise[good], self.config.stat_sig, 5
+                )
+                ratio = sd / mean
+                if ratio > 1:
+                    ok = good & ((output_mask & 0xFF) != 0)
+                    final_noise[ok] *= ratio
+
+        # A normalized kernel has sum kernel_solution[1] everywhere: the other
+        # bases have zero sum. Keep all returned image products in the same units.
+        if self.config.normalize == conv_direction:
+            scale = float(self.results["kernel_solution"][1])
+            if not np.isfinite(scale) or scale <= 0:
+                raise HotpantsError(
+                    "cannot normalize by a nonpositive/nonfinite kernel sum"
+                )
+            diff_image = diff_image / scale
+            convolved_image = convolved_image / scale
+            bkg = bkg / scale
+            final_noise = final_noise / scale
+
+        self.results.update(
+            {
+                "convolved_image": convolved_image,
+                "background": bkg,
+                "output_mask": output_mask,
+                "diff_image": diff_image,
+                "noise_image": final_noise,
+            }
+        )
 
         self._populate_global_convolved_models()
 
@@ -1086,13 +1404,21 @@ class Hotpants:
         # before computing/returning final products.
 
         if self.use_c_extension:
-            self.results["stats"] = self.ext.calculate_final_stats(self._c_state, final_diff, final_noise, output_mask)
+            self.results["stats"] = self.ext.calculate_final_stats(
+                self._c_state, final_diff, final_noise, output_mask
+            )
         else:
             # Pure Python Stats Calculation — match getNoiseStats3 / getStampStats3
             # good pixels: umask=0, smask=0xffff → skip any flagged mask bit; skip |diff|<=ZEROVAL
-            ZEROVAL = 1e-20
+            ZEROVAL = 1e-10
             m = output_mask.astype(np.int32, copy=False)
-            good = (m == 0) & np.isfinite(final_diff) & (np.abs(final_diff) > ZEROVAL) & (final_noise > 0)
+            good = (
+                (m == 0)
+                & np.isfinite(final_diff)
+                & (np.abs(final_diff) > ZEROVAL)
+                & (final_noise > 0)
+                & np.isfinite(final_noise)
+            )
 
             if np.any(good):
                 diff_vals = final_diff[good]
@@ -1102,7 +1428,12 @@ class Hotpants:
                 stats["diff_mean"] = float(np.mean(diff_vals))
                 # Sample stdev like getStampStats3 / sigma_clip path
                 if diff_vals.size > 1:
-                    stats["diff_std"] = float(np.sqrt(np.sum((diff_vals - stats["diff_mean"]) ** 2) / (diff_vals.size - 1)))
+                    stats["diff_std"] = float(
+                        np.sqrt(
+                            np.sum((diff_vals - stats["diff_mean"]) ** 2)
+                            / (diff_vals.size - 1)
+                        )
+                    )
                 else:
                     stats["diff_std"] = 0.0
                 stats["noise_mean"] = float(np.mean(noise_vals))
@@ -1115,8 +1446,11 @@ class Hotpants:
                 self.results["stats"] = stats
             else:
                 self.results["stats"] = {
-                    "diff_mean": 0.0, "diff_std": 0.0, "noise_mean": 0.0,
-                    "nx2norm": 0, "x2norm": 0.0
+                    "diff_mean": np.nan,
+                    "diff_std": np.nan,
+                    "noise_mean": np.nan,
+                    "nx2norm": 0,
+                    "x2norm": np.nan,
                 }
 
         return {
@@ -1146,9 +1480,19 @@ class Hotpants:
 
         header_to_use = self.output_header
         # Check if any FITS saving is requested
-        if any([self.config.output_file, self.config.noise_image_file, self.config.mask_image_file, self.config.convolved_image_file, self.config.sigma_image_file]):
+        if any(
+            [
+                self.config.output_file,
+                self.config.noise_image_file,
+                self.config.mask_image_file,
+                self.config.convolved_image_file,
+                self.config.sigma_image_file,
+            ]
+        ):
             if header_to_use is None:
-                warnings.warn("No FITS header available. Creating a minimal header. WCS and other metadata will be missing.")
+                warnings.warn(
+                    "No FITS header available. Creating a minimal header. WCS and other metadata will be missing."
+                )
                 header_to_use = fits.Header()
 
         if self.config.stamp_region_file:
@@ -1156,17 +1500,44 @@ class Hotpants:
 
         # Save FITS files if configured
         if self.config.output_file:
-            self._save_fits_image(self.config.output_file, self.results["diff_image"], header_to_use, "difference")
+            self._save_fits_image(
+                self.config.output_file,
+                self.results["diff_image"],
+                header_to_use,
+                "difference",
+            )
         if self.config.noise_image_file:
-            self._save_fits_image(self.config.noise_image_file, self.results["noise_image"], header_to_use, "noise")
+            self._save_fits_image(
+                self.config.noise_image_file,
+                self.results["noise_image"],
+                header_to_use,
+                "noise",
+            )
         if self.config.mask_image_file:
-            self._save_fits_image(self.config.mask_image_file, self.results["output_mask"], header_to_use, "mask")
+            self._save_fits_image(
+                self.config.mask_image_file,
+                self.results["output_mask"],
+                header_to_use,
+                "mask",
+            )
         if self.config.convolved_image_file:
-            self._save_fits_image(self.config.convolved_image_file, self.results["convolved_image"], header_to_use, "convolved")
+            self._save_fits_image(
+                self.config.convolved_image_file,
+                self.results["convolved_image"],
+                header_to_use,
+                "convolved",
+            )
         if self.config.sigma_image_file:
             # Calculate sigma image on the fly
-            sigma_image = np.divide(self.results["diff_image"], self.results["noise_image"], out=np.full_like(self.results["diff_image"], self.config.fillval), where=self.results["noise_image"] != 0)
-            self._save_fits_image(self.config.sigma_image_file, sigma_image, header_to_use, "sigma")
+            sigma_image = np.divide(
+                self.results["diff_image"],
+                self.results["noise_image"],
+                out=np.full_like(self.results["diff_image"], self.config.fillval),
+                where=self.results["noise_image"] != 0,
+            )
+            self._save_fits_image(
+                self.config.sigma_image_file, sigma_image, header_to_use, "sigma"
+            )
 
     def _save_stamp_region_file(self, filename: str):
         """Saves a DS9 region file showing used and rejected stamps."""
@@ -1174,7 +1545,9 @@ class Hotpants:
         if not conv_direction:
             return
 
-        stamps_to_plot = self.template_substamps if conv_direction == "t" else self.image_substamps
+        stamps_to_plot = (
+            self.template_substamps if conv_direction == "t" else self.image_substamps
+        )
         box_size = self.config.fwksstamp
 
         with open(filename, "w") as f:
@@ -1193,51 +1566,100 @@ class Hotpants:
 
                 if color:
                     # DS9 uses 1-based coordinates
-                    f.write(f"box({s.x + 1},{s.y + 1},{box_size},{box_size},0) # color={color}\n")
+                    f.write(
+                        f"box({s.x + 1},{s.y + 1},{box_size},{box_size},0) # color={color}\n"
+                    )
         if self.config.verbose >= 1:
             print(f"Saved stamp region file to {filename}")
 
-    def _save_fits_image(self, filename: str, data: np.ndarray, header: fits.Header, image_type: str):
+    def _save_fits_image(
+        self, filename: str, data: np.ndarray, header: fits.Header, image_type: str
+    ):
         """Internal helper to save a FITS image with replicated headers."""
         # Create a copy to avoid modifying the original header object in memory
         hdr = header.copy()
 
         # Add HOTPANTS specific headers, replicating main.c
         hdr.add_blank("", before=0)
-        hdr.set("SOFTNAME", "HOTPanTS", "The software that differenced this image", after=0)
+        hdr.set(
+            "SOFTNAME", "HOTPanTS", "The software that differenced this image", after=0
+        )
         hdr.set("SOFTVERS", __version__, "Version", after="SOFTNAME")
         hdr.set("SOFTAUTH", "A. Becker / A. Rest", "Author", after="SOFTVERS")
         try:
-            hdr.set("AUTHOR", getpass.getuser(), "Who ran the software", after="SOFTAUTH")
+            hdr.set(
+                "AUTHOR", getpass.getuser(), "Who ran the software", after="SOFTAUTH"
+            )
         except Exception:
             hdr.set("AUTHOR", "unknown", "Who ran the software", after="SOFTAUTH")
         try:
             hdr.set("ORIGIN", socket.gethostname(), "Where it was done", after="AUTHOR")
         except Exception:
             hdr.set("ORIGIN", "unknown", "Where it was done", after="AUTHOR")
-        hdr.set("DATE", datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"), "When it was started (GMT)", after="ORIGIN")
+        hdr.set(
+            "DATE",
+            datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+            "When it was started (GMT)",
+            after="ORIGIN",
+        )
         hdr.add_blank("", after="DATE")
 
-        stats = self.results.get("stats", {})
-        fit_stats = self.results.get("fit_stats", {})
+        def _finite_header(value):
+            return float(value) if value is not None and np.isfinite(value) else -1.0
 
-        hdr.set("CONVOL00", self.results.get("conv_direction", "N/A").upper(), "Direction of convolution")
+        stats = self.results.get("stats") or {}
+        fit_stats = self.results.get("fit_stats") or {}
+
+        hdr.set("PHOTNORM", self.config.normalize, "Photometric output units: t/i/u")
+        hdr.set(
+            "CONVOL00",
+            self.results.get("conv_direction", "N/A").upper(),
+            "Direction of convolution",
+        )
         # Calculate kernel sum at center of image
-        kernel_center = self.visualize_kernel(at_coords=(self.nx_lr // 2, self.ny_lr // 2), size_factor=1.0)
+        kernel_center = self.visualize_kernel(
+            at_coords=(self.nx_lr // 2, self.ny_lr // 2), size_factor=1.0
+        )
         hdr.set("KSUM00", float(np.sum(kernel_center)), "Kernel Sum at image center")
-        hdr.set("SSSIG00", fit_stats.get("meansig", -1.0), "Average Figure of Merit across Stamps")
-        hdr.set("SSSCAT00", fit_stats.get("scatter", -1.0), "Stdev in Figure of Merit")
-        hdr.set("X2NRM00", stats.get("x2norm", -1.0), "1/N * SUM (diff/noise)^2")
+        hdr.set(
+            "SSSIG00",
+            _finite_header(fit_stats.get("meansig", -1.0)),
+            "Average Figure of Merit across Stamps",
+        )
+        hdr.set(
+            "SSSCAT00",
+            _finite_header(fit_stats.get("scatter", -1.0)),
+            "Stdev in Figure of Merit",
+        )
+        hdr.set(
+            "X2NRM00",
+            _finite_header(stats.get("x2norm", -1.0)),
+            "1/N * SUM (diff/noise)^2",
+        )
         hdr.set("NX2NRM00", stats.get("nx2norm", -1), "Number of pixels in X2NRM")
-        hdr.set("DMEAN00", stats.get("diff_mean", -1.0), "Mean of diff image; good pixels")
-        hdr.set("DSIGE00", stats.get("diff_std", -1.0), "Stdev of diff image; good pixels")
-        hdr.set("DSIG00", stats.get("noise_mean", -1.0), "Mean of noise image; good pixels")
+        hdr.set(
+            "DMEAN00",
+            _finite_header(stats.get("diff_mean", -1.0)),
+            "Mean of diff image; good pixels",
+        )
+        hdr.set(
+            "DSIGE00",
+            _finite_header(stats.get("diff_std", -1.0)),
+            "Stdev of diff image; good pixels",
+        )
+        hdr.set(
+            "DSIG00",
+            _finite_header(stats.get("noise_mean", -1.0)),
+            "Mean of noise image; good pixels",
+        )
 
+        # FITS header scalars cannot encode NaN; -1 denotes unavailable statistics.
+        for key in ("SSSIG00", "SSSCAT00", "X2NRM00", "DMEAN00", "DSIGE00", "DSIG00"):
+            if key in hdr and not np.isfinite(hdr[key]):
+                hdr[key] = -1.0
         if image_type == "mask":
             # Save mask as 16-bit integer with BZERO/BSCALE for compatibility with C output
-            hdu = fits.PrimaryHDU(data=data.astype(np.int16), header=hdr)
-            hdu.header["BITPIX"] = 16
-            hdu.scale("int16", bzero=32768)
+            hdu = fits.PrimaryHDU(data=data.astype(np.uint16), header=hdr)
         else:
             hdu = fits.PrimaryHDU(data=data, header=hdr)
 
@@ -1279,7 +1701,9 @@ class Hotpants:
             print(f"Stage timings: {parts}", flush=True)
         return outputs
 
-    def visualize_kernel(self, at_coords: Tuple[int, int], size_factor: float = 2.0) -> np.ndarray:
+    def visualize_kernel(
+        self, at_coords: Tuple[int, int], size_factor: float = 2.0
+    ) -> np.ndarray:
         """
         Generates an image of the convolution kernel at a specific coordinate.
 
@@ -1300,20 +1724,37 @@ class Hotpants:
             TypeError: If at_coords is not a tuple of two integers.
             ValueError: If size_factor is not a positive number.
         """
+        self._check_config()
         if "kernel_solution" not in self.results:
-            raise HotpantsError("Kernel solution not found. The fitting pipeline must be run before a kernel can be visualized.")
+            raise HotpantsError(
+                "Kernel solution not found. The fitting pipeline must be run before a kernel can be visualized."
+            )
 
-        if not (isinstance(at_coords, tuple) and len(at_coords) == 2 and all(isinstance(i, int) for i in at_coords)):
+        if not (
+            isinstance(at_coords, tuple)
+            and len(at_coords) == 2
+            and all(isinstance(i, int) for i in at_coords)
+        ):
             raise TypeError("at_coords must be a tuple of two integers (x, y).")
 
-        if not isinstance(size_factor, (int, float)) or size_factor <= 0:
-            raise ValueError("size_factor must be a positive number.")
+        if (
+            not isinstance(size_factor, (int, float))
+            or not np.isfinite(size_factor)
+            or size_factor < 1
+        ):
+            raise ValueError("size_factor must be finite and >= 1.")
+        if not (0 <= at_coords[0] < self.nx_lr and 0 <= at_coords[1] < self.ny_lr):
+            raise ValueError("at_coords must lie within the science image")
 
         if self.use_c_extension:
-            kernel_image = self.ext.visualize_kernel(self._c_state, at_coords, self.results["kernel_solution"], size_factor)
+            kernel_image = self.ext.visualize_kernel(
+                self._c_state, at_coords, self.results["kernel_solution"], size_factor
+            )
         else:
             # Pure Python: scale kernel to HR when oversample>1 (template convolution).
-            scale = self.oversample if self.results.get("conv_direction", "t") == "t" else 1
+            scale = (
+                self.oversample if self.results.get("conv_direction", "t") == "t" else 1
+            )
             basis_funcs = self._ensure_kernel_basis(scale)
             hr_rkernel = self.config.rkernel * scale
             k_size = 2 * hr_rkernel + 1
@@ -1324,46 +1765,56 @@ class Hotpants:
             x, y = at_coords  # LR science coordinates
             kernel_sol = self.results["kernel_solution"]
 
-            step = int(getattr(self.config, "kc_step", 2 * self.config.rkernel + 1) or (2 * self.config.rkernel + 1))
+            step = int(
+                getattr(self.config, "kc_step", 2 * self.config.rkernel + 1)
+                or (2 * self.config.rkernel + 1)
+            )
             ker_order = self.config.ko
             n_comp_ker = len(basis_funcs)
 
             # Spatial polys use LR frame (matches fit_kernel / apply_kernel).
             local_kernel = pure.convolution.jit_make_kernel(
-                kernel_sol, step * scale, hr_rkernel,
-                float(self.nx_lr), float(self.ny_lr),
-                n_comp_ker, ker_order, kernel_vecs,
-                float(x), float(y),
+                kernel_sol,
+                step * scale,
+                hr_rkernel,
+                float(self.nx_lr),
+                float(self.ny_lr),
+                n_comp_ker,
+                ker_order,
+                kernel_vecs,
+                float(x),
+                float(y),
             )
 
             # Output image sizing
             out_size = int(k_size * size_factor)
             output = np.zeros((out_size, out_size))
-            
+
             # Center the kernel
-            y_off = (out_size - k_size) // 2
-            x_off = (out_size - k_size) // 2
-            
+            y_off = out_size // 2 - hr_rkernel
+            x_off = out_size // 2 - hr_rkernel
+
             # Handle clipping if output is smaller than kernel (unlikely but possible)
             y_start_k = 0
             y_end_k = k_size
             x_start_k = 0
             x_end_k = k_size
-            
+
             if y_off < 0:
                 y_start_k = -y_off
                 y_off = 0
             if x_off < 0:
                 x_start_k = -x_off
                 x_off = 0
-                
+
             h_paste = min(out_size - y_off, y_end_k - y_start_k)
             w_paste = min(out_size - x_off, x_end_k - x_start_k)
-            
+
             if h_paste > 0 and w_paste > 0:
-                output[y_off:y_off+h_paste, x_off:x_off+w_paste] = \
-                    local_kernel[y_start_k:y_start_k+h_paste, x_start_k:x_start_k+w_paste]
-            
+                output[y_off : y_off + h_paste, x_off : x_off + w_paste] = local_kernel[
+                    y_start_k : y_start_k + h_paste, x_start_k : x_start_k + w_paste
+                ]
+
             kernel_image = output
         return kernel_image
 
@@ -1379,11 +1830,24 @@ class Hotpants:
             `image_substamps`.
         """
         if "conv_direction" not in self.results:
-            raise HotpantsError("Pipeline must be run (at least to iterative_fit_and_clip) before getting substamp details.")
+            raise HotpantsError(
+                "Pipeline must be run (at least to iterative_fit_and_clip) before getting substamp details."
+            )
 
-        final_fit_locations = [{"id": s.id, "x": s.x, "y": s.y} for s in self.template_substamps + self.image_substamps if s.status == SubstampStatus.USED_IN_FINAL_FIT]
+        final_fit_locations = [
+            {"id": s.id, "x": s.x, "y": s.y}
+            for s in self.template_substamps + self.image_substamps
+            if s.status == SubstampStatus.USED_IN_FINAL_FIT
+        ]
 
-        return {"template_substamps": self.template_substamps, "image_substamps": self.image_substamps, "final_fit_locations": {"convolution_direction": self.results["conv_direction"], "locations": final_fit_locations}}
+        return {
+            "template_substamps": self.template_substamps,
+            "image_substamps": self.image_substamps,
+            "final_fit_locations": {
+                "convolution_direction": self.results["conv_direction"],
+                "locations": final_fit_locations,
+            },
+        }
 
     def _populate_global_convolved_models(self):
         """
@@ -1413,5 +1877,11 @@ class Hotpants:
             x_center = substamp.x
             y_center = substamp.y
 
-            cutout = pyhotpants.cut_substamp_from_image(image=convolved_image, x_center=x_center, y_center=y_center, half_width=hw, fill_value=fill_value)
+            cutout = pyhotpants.cut_substamp_from_image(
+                image=convolved_image,
+                x_center=x_center,
+                y_center=y_center,
+                half_width=hw,
+                fill_value=fill_value,
+            )
             substamp.convolved_model_global = cutout

@@ -4,6 +4,8 @@ Configuration module for the HOTPANTS wrapper.
 """
 
 from typing import Dict, Any
+import math
+import numbers
 
 
 class HotpantsConfig:
@@ -82,8 +84,9 @@ class HotpantsConfig:
         deg_fixe (List[int]): Polynomial degrees associated with each Gaussian
             component. Length should equal `ngauss`. Default: [6, 4, 2]. Each
             entry is the maximum polynomial degree for that Gaussian basis.
-        sigma_gauss (List[float]): Widths (sigma) of each Gaussian component in
-            pixels. Length should equal `ngauss`. Default: [0.7, 1.5, 3.0].
+        sigma_gauss (List[float]): Gaussian exponent coefficients in inverse pixel squared
+            units: exp(-coefficient * x**2). For width sigma in pixels,
+            supply coefficient = 1/(2*sigma**2). Length should equal `ngauss`. Default: [0.7, 1.5, 3.0].
 
         Note:
             The following parameters from the original HOTPANTS are not implemented in this wrapper:
@@ -189,8 +192,20 @@ class HotpantsConfig:
         self.nregy = 1
         # [-nsx xstamp]     : number of each region's stamps in x dimension (10)
         self.nstampx = kwargs.get("nstampx", 10)
+        if (
+            not isinstance(self.nstampx, numbers.Integral)
+            or isinstance(self.nstampx, bool)
+            or self.nstampx < 1
+        ):
+            raise ValueError("nstampx must be a positive integer")
         # [-nsy ystamp]     : number of each region's stamps in y dimension (10)
         self.nstampy = kwargs.get("nstampy", 10)
+        if (
+            not isinstance(self.nstampy, numbers.Integral)
+            or isinstance(self.nstampy, bool)
+            or self.nstampy < 1
+        ):
+            raise ValueError("nstampy must be a positive integer")
 
         # Output file paths
         self.output_file = kwargs.get("output_file", None)
@@ -199,6 +214,52 @@ class HotpantsConfig:
         self.convolved_image_file = kwargs.get("convolved_image_file", None)
         self.sigma_image_file = kwargs.get("sigma_image_file", None)
         self.stamp_region_file = kwargs.get("stamp_region_file", None)
+
+        unknown = (
+            set(kwargs)
+            - set(self.__dict__)
+            - {
+                "nx",
+                "ny",
+                "ngauss",
+                "deg_fixe",
+                "sigma_gauss",
+                "hwkernel",
+                "hwksstamp",
+                "fwkernel",
+                "fwksstamp",
+                "fwstamp",
+                "ncomp",
+                "n_bg_vectors",
+                "ncomp_ker",
+                "n_comp_total",
+            }
+        )
+        if unknown:
+            raise TypeError(
+                f"Unknown HotpantsConfig parameters: {', '.join(sorted(unknown))}"
+            )
+        for name, minimum, maximum in (
+            ("rkernel", 0, 16383),
+            ("rss", 1, 16383),
+            ("ko", 0, 64),
+            ("bgo", -1, 64),
+        ):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, numbers.Integral)
+                or not minimum <= value <= maximum
+            ):
+                raise ValueError(f"{name} must be an integer in [{minimum}, {maximum}]")
+        for name in ("nx", "ny"):
+            value = kwargs.get(name, 2048)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, numbers.Integral)
+                or value <= 0
+            ):
+                raise ValueError(f"{name} must be a positive integer")
 
         # Derived values for C code
         self.hwkernel = self.rkernel
@@ -210,17 +271,20 @@ class HotpantsConfig:
         _ny = kwargs.get("ny", 2048)
 
         # This calculation mirrors the logic in main.c to estimate stamp width
-        fwstamp_est = min(_nx / self.nregx / self.nstampx, _ny / self.nregy / self.nstampy)
+        fwstamp_est = min(
+            _nx / self.nregx / self.nstampx, _ny / self.nregy / self.nstampy
+        )
         fwstamp_est -= self.fwkernel
         fwstamp_est -= 1 if int(fwstamp_est) % 2 == 0 else 0
         self.fwstamp = int(max(fwstamp_est, self.fwksstamp + self.fwkernel))
 
         # [-ng ngauss]      : number of gaussians which compose kernel (3)
-        self.ngauss = kwargs.get("ngauss", 3)
+        self.ngauss = kwargs.get("ngauss", len(kwargs.get("deg_fixe", [6, 4, 2])))
         # [-ng ... degree0 .. degreeN] : degree of polynomial associated with gaussian #
-        self.deg_fixe = kwargs.get("deg_fixe", [6, 4, 2])
+        self.deg_fixe = list(kwargs.get("deg_fixe", [6, 4, 2]))
         # [-ng ... sigma0 .. sigmaN] : width of gaussian #
-        self.sigma_gauss = kwargs.get("sigma_gauss", [0.7, 1.5, 3.0])
+        self.sigma_gauss = list(kwargs.get("sigma_gauss", [0.7, 1.5, 3.0]))
+        self.validate()
         self.ncomp = ((self.ko + 1) * (self.ko + 2)) // 2
         self.n_bg_vectors = ((self.bgo + 1) * (self.bgo + 2)) // 2
         self.ncomp_ker = sum(((d + 1) * (d + 2)) // 2 for d in self.deg_fixe)
@@ -231,6 +295,99 @@ class HotpantsConfig:
         if self.iuktresh is None:
             self.iuktresh = self.iuthresh
 
+    def validate(self):
+        """Reject invalid numeric and algorithm settings before either backend runs."""
+        for name in ("nss", "nstampx", "nstampy", "ngauss"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, numbers.Integral)
+                or value <= 0
+            ):
+                raise ValueError(f"{name} must be a positive integer")
+        if len(self.deg_fixe) != self.ngauss or len(self.sigma_gauss) != self.ngauss:
+            raise ValueError("ngauss must match deg_fixe and sigma_gauss lengths")
+        if any(
+            isinstance(d, bool)
+            or not isinstance(d, numbers.Integral)
+            or not 0 <= d <= 64
+            for d in self.deg_fixe
+        ):
+            raise ValueError("Gaussian degrees must be integers in [0, 64]")
+        if any(not math.isfinite(s) or s <= 0 for s in self.sigma_gauss):
+            raise ValueError("Gaussian coefficients must be finite and positive")
+        choices = {
+            "force_convolve": "tib",
+            "normalize": "tiu",
+            "fom": "vsh",
+            "stamp_mode": ("grid", "connected_regions"),
+            "region_weight": ("uniform", "npix", "flux", "invvar"),
+            "region_connectivity": (4, 8),
+        }
+        for name, allowed in choices.items():
+            value = getattr(self, name)
+            if value not in allowed or (isinstance(allowed, str) and len(value) != 1):
+                raise ValueError(f"invalid {name}: {value!r}")
+        for name in ("tgain", "igain", "ks", "stat_sig", "region_max_diameter"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and positive")
+        for name in (
+            "trdnoise",
+            "irdnoise",
+            "fitthresh",
+            "kf_spread_mask1",
+            "lambda_reg",
+        ):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and nonnegative")
+        for name in (
+            "tuthresh",
+            "tuktresh",
+            "tlthresh",
+            "iuthresh",
+            "iuktresh",
+            "ilthresh",
+            "tpedestal",
+            "ipedestal",
+            "fillval",
+            "fillval_noise",
+        ):
+            value = getattr(self, name)
+            if value is not None and (
+                not math.isfinite(value) or abs(value) > 3.402823466e38
+            ):
+                raise ValueError(f"{name} must be representable as a finite float32")
+        if not math.isfinite(self.kfm) or not 0 <= self.kfm <= 1:
+            raise ValueError("kfm must be in [0, 1]")
+        if self.use_pca:
+            raise ValueError(
+                "PCA kernels are not supported: no PCA basis input is implemented"
+            )
+        for name in ("region_rss", "region_min_npix"):
+            value = getattr(self, name)
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, numbers.Integral)
+                or value < 1
+            ):
+                raise ValueError(f"{name} must be a positive integer or None")
+        for name in ("region_max_area", "region_max_bisects", "verbose"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, numbers.Integral)
+                or value < 0
+            ):
+                raise ValueError(f"{name} must be a nonnegative integer")
+        if (
+            len(self.region_weight_cap) != 2
+            or not all(math.isfinite(v) for v in self.region_weight_cap)
+            or not 0 < self.region_weight_cap[0] <= self.region_weight_cap[1]
+        ):
+            raise ValueError("region_weight_cap must be a positive ordered pair")
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to a dictionary for passing to the C extension."""
         d = self.__dict__.copy()
@@ -240,4 +397,12 @@ class HotpantsConfig:
         # Ensure lists are passed correctly
         d["deg_fixe"] = list(d["deg_fixe"])
         d["sigma_gauss"] = list(d["sigma_gauss"])
+        # Convert NumPy scalar configuration values before entering the C API.
+        for key, value in d.items():
+            if isinstance(value, numbers.Integral):
+                d[key] = int(value)
+            elif isinstance(value, numbers.Real):
+                d[key] = float(value)
+        d["deg_fixe"] = [int(v) for v in d["deg_fixe"]]
+        d["sigma_gauss"] = [float(v) for v in d["sigma_gauss"]]
         return d

@@ -7,8 +7,14 @@ import numpy as np
 from numba import njit, typed
 
 
-@njit(cache=True)
-def cut_substamp_from_image(image: np.ndarray, x_center: int, y_center: int, half_width: int, fill_value: float = np.nan) -> np.ndarray:
+@njit(boundscheck=True, cache=True)
+def cut_substamp_from_image(
+    image: np.ndarray,
+    x_center: int,
+    y_center: int,
+    half_width: int,
+    fill_value: float = np.nan,
+) -> np.ndarray:
     """
     Extracts a square substamp from a larger image, equivalent to the C 'cutSStamp' logic.
 
@@ -56,13 +62,22 @@ def cut_substamp_from_image(image: np.ndarray, x_center: int, y_center: int, hal
     paste_x_end = paste_x_start + (x_end_clipped - x_start_clipped)
 
     # 6. Paste the data and return
-    full_cutout[paste_y_start:paste_y_end, paste_x_start:paste_x_end] = partial_cutout
+    if paste_y_end > paste_y_start and paste_x_end > paste_x_start:
+        full_cutout[paste_y_start:paste_y_end, paste_x_start:paste_x_end] = (
+            partial_cutout
+        )
 
     return full_cutout
 
 
-@njit(cache=True)
-def _numba_cut_substamp(image: np.ndarray, full_cutout: np.ndarray, x_center: int, y_center: int, half_width: int):
+@njit(boundscheck=True, cache=True)
+def _numba_cut_substamp(
+    image: np.ndarray,
+    full_cutout: np.ndarray,
+    x_center: int,
+    y_center: int,
+    half_width: int,
+):
     """
     Numba-accelerated core logic for extracting a single substamp.
 
@@ -93,8 +108,14 @@ def _numba_cut_substamp(image: np.ndarray, full_cutout: np.ndarray, x_center: in
     return full_cutout
 
 
-@njit(cache=True)
-def process_all_substamps_numba(image: np.ndarray, x_coords: np.ndarray, y_coords: np.ndarray, half_width: int, fill_value: float) -> typed.List:
+@njit(boundscheck=True, cache=True)
+def process_all_substamps_numba(
+    image: np.ndarray,
+    x_coords: np.ndarray,
+    y_coords: np.ndarray,
+    half_width: int,
+    fill_value: float,
+) -> typed.List:
     """
     Processes a batch of substamps using Numba to accelerate the main loop.
 
@@ -111,6 +132,10 @@ def process_all_substamps_numba(image: np.ndarray, x_coords: np.ndarray, y_coord
     Returns:
         numba.typed.List: A Numba typed list containing all the generated 2D cutout arrays.
     """
+    if len(x_coords) != len(y_coords) or half_width < 0:
+        raise ValueError(
+            "coordinate lengths must agree and half_width must be nonnegative"
+        )
     num_substamps = len(x_coords)
 
     # Numba requires a typed list to store arrays.
@@ -122,6 +147,8 @@ def process_all_substamps_numba(image: np.ndarray, x_coords: np.ndarray, y_coord
         y_center = int(round(y_coords[i]))
 
         # Call the core helper to populate this single cutout
-        all_cutouts[i] = cut_substamp_from_image(image, x_center, y_center, half_width)
+        all_cutouts[i] = cut_substamp_from_image(
+            image, x_center, y_center, half_width, fill_value
+        )
 
     return all_cutouts

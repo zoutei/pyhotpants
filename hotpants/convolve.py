@@ -5,6 +5,7 @@ Standalone template convolution using a saved HOTPANTS kernel solution.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import copy
 from typing import TYPE_CHECKING, Tuple, Union
 
 import numpy as np
@@ -42,14 +43,22 @@ class KernelModel:
             raise ValueError(
                 "kernel_solution not found. Run iterative_fit_and_clip() before extracting a KernelModel."
             )
+        if hp.oversample != 1:
+            raise ValueError(
+                "standalone convolution does not support oversampled kernel models"
+            )
         return cls(
-            kernel_solution=np.asarray(hp.results["kernel_solution"], dtype=np.float64),
-            config=hp.config,
-            fit_shape=hp.template_data.shape,
+            kernel_solution=np.array(
+                hp.results["kernel_solution"], dtype=np.float64, copy=True
+            ),
+            config=copy.deepcopy(hp.config),
+            fit_shape=hp.image_data.shape,
         )
 
 
-def _config_for_convolution(config: HotpantsConfig, template: np.ndarray) -> HotpantsConfig:
+def _config_for_convolution(
+    config: HotpantsConfig, template: np.ndarray
+) -> HotpantsConfig:
     """Adapt a saved config for convolution on the given template."""
     ny, nx = template.shape
     params = config.to_dict()
@@ -65,7 +74,10 @@ def _config_for_convolution(config: HotpantsConfig, template: np.ndarray) -> Hot
 
 
 def _validate_kernel_config(config: HotpantsConfig) -> None:
-    if len(config.deg_fixe) != config.ngauss or len(config.sigma_gauss) != config.ngauss:
+    if (
+        len(config.deg_fixe) != config.ngauss
+        or len(config.sigma_gauss) != config.ngauss
+    ):
         raise ValueError(
             f"ngauss ({config.ngauss}) must match lengths of "
             f"deg_fixe ({len(config.deg_fixe)}) and sigma_gauss ({len(config.sigma_gauss)})."
@@ -104,8 +116,11 @@ def convolve_template(
         kernel_solution = kernel
         fit_shape = None
 
-    if template.ndim != 2:
-        raise ValueError(f"template must be a 2D array, got {template.ndim} dimensions.")
+    template = np.asarray(template)
+    if template.ndim != 2 or not template.size:
+        raise ValueError(
+            f"template must be a 2D array, got {template.ndim} dimensions."
+        )
 
     template = np.ascontiguousarray(template, dtype=np.float32)
     ny, nx = template.shape
@@ -116,9 +131,14 @@ def convolve_template(
             "Spatial kernel variation is tied to the image dimensions used during fitting."
         )
 
+    config.validate()
     _validate_kernel_config(config)
 
     kernel_solution = np.ascontiguousarray(kernel_solution, dtype=np.float64)
+    if kernel_solution.ndim != 1 or not np.all(np.isfinite(kernel_solution)):
+        raise ValueError("kernel_solution must be a finite 1D array")
+    if not np.all(np.isfinite(template)):
+        raise ValueError("standalone convolution requires a finite template")
     expected_len = config.n_comp_total + 1
     if kernel_solution.size != expected_len:
         raise ValueError(

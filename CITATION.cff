@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: >-
+  Please cite the archived pyhotpants version used in your research when a DOI
+  becomes available, and credit the original HOTPANTS implementation separately.
+type: software
+title: "pyhotpants: Python interface to HOTPANTS image subtraction"
+version: 0.3.0rc1
+authors:
+  - family-names: Shukawa
+    given-names: Koji
+repository-code: "https://github.com/zoutei/pyhotpants"
+url: "https://github.com/zoutei/pyhotpants"
+license: MIT
+abstract: >-
+  Python interface to Andrew Becker's HOTPANTS image-subtraction implementation,
+  with inspectable fitting stages, reusable kernel solutions, and an optional
+  Python/Numba backend supporting oversampled templates and connected-region
+  stamps. This metadata describes an unreleased audit candidate.
+keywords:
+  - astronomy
+  - image subtraction
+  - point spread function

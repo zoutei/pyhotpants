@@ -1,47 +1,26 @@
 .. _parity_policy:
 
-C vs pure Python parity policy
-==============================
+C and Python validation
+=======================
 
-For classic configurations the pure Python backend aims to reproduce the C
-extension results on the same inputs.
+The tests compare fixed kernel operators, background, variance propagation,
+mask policy and local kernel evaluation between backends. Synthetic end-to-end
+workflows exercise both directions, automatic selection and background orders,
+including disabled background. Connected-region and oversampled FFT tests
+cover modes with no C counterpart.
 
-In scope
---------
+End-to-end refits are not promised to be bit-identical: stamp selection,
+statistics and numerical solvers differ. Fixed-operator agreement does not
+establish real-data photometric equivalence. Validate each science recipe and
+retain its version and configuration.
 
-* ``use_c_extension=False``
-* ``oversample=1``
-* ``stamp_mode="grid"`` (classic substamps)
+Native memory checks
+--------------------
 
-Compared products (minimum)
----------------------------
+``tools/memory_probe.py`` exercises repeated initialization, searches, local and
+global fits, convolution, visualization, statistics and failure cleanup.
+Valgrind checks invalid accesses and lost allocations. The Linux/glibc preload
+helper ``tools/native_alloc_fail.c`` enumerates native allocation failures;
+it does not replace failure testing of Python or NumPy's own allocators.
 
-* Difference image
-* Convolved image / background (as returned by the public API)
-* Kernel solution vector
-* Output mask (exact or documented bit policy)
-* Noise map when part of the returned products
-
-Tolerances should start strict (float32 ``atol`` / ``rtol`` as appropriate) and
-only be widened with a written justification per product.
-
-Out of scope (no C twin)
-------------------------
-
-* ``oversample > 1``
-* ``stamp_mode="connected_regions"``
-
-These modes are validated with their own unit tests and real-data soak runs,
-not by bit-matching the C grid path.
-
-How we test
------------
-
-* Synthetic / unit tests under ``tests/`` (e.g. connected-region builders)
-* Real-data comparisons (JWST JADES example data under ``example/data/`` and
-  developer notebooks such as ``dev/compare_c_vs_pure_jwst.ipynb``)
-* A curated fixture pack with C golden outputs is planned before promoting
-  0.2.0 from ``development`` to ``main``
-
-Until that fixture harness lands, treat 0.2.0 on ``development`` as **staging**:
-suitable for further testing, not yet the default install target.
+See ``docs/AUDIT.md`` and ``CHANGELOG.md`` for coverage and migration details.

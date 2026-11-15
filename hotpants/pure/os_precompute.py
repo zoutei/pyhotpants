@@ -31,10 +31,19 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from scipy.fft import irfft2, next_fast_len, rfft2
 from scipy.signal import fftconvolve
+from scipy.ndimage import maximum_filter
 
 
 def block_sum_downsample(image: np.ndarray, factor: int) -> np.ndarray:
     """Block-sum downsample; faster than the pure-Python utils.downsample_image."""
+    if (
+        isinstance(factor, bool)
+        or not isinstance(factor, (int, np.integer))
+        or factor < 1
+    ):
+        raise ValueError("factor must be a positive integer")
+    if np.ndim(image) != 2 or any(d % factor for d in np.shape(image)):
+        raise ValueError("image must be 2D with dimensions divisible by factor")
     if factor == 1:
         return np.asarray(image)
     img = np.asarray(image)
@@ -80,7 +89,9 @@ def _fftconvolve_valid(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return np.asarray(fftconvolve(a, b, mode="valid"), dtype=np.float64)
 
 
-def _valid_slice(fshape: tuple[int, int], hr_shape: tuple[int, int], k_shape: tuple[int, int]):
+def _valid_slice(
+    fshape: tuple[int, int], hr_shape: tuple[int, int], k_shape: tuple[int, int]
+):
     """Index the 'valid'-mode region out of a same-shape 'full' convolution.
 
     Matches ``scipy.signal.fftconvolve(a, b, mode="valid")``'s own crop
@@ -109,6 +120,8 @@ def precompute_basis_lr_maps(
     -------
     basis_lr : (n_ker, ny, nx) float64
     """
+    if isinstance(oversample, bool) or not isinstance(oversample, (int, np.integer)):
+        raise ValueError("oversample must be an integer")
     F = int(oversample)
     if F <= 1:
         raise ValueError("precompute_basis_lr_maps is for oversample>1")
@@ -118,7 +131,27 @@ def precompute_basis_lr_maps(
     if kstack.ndim != 3:
         raise ValueError(f"kernel_vecs must be (n,kh,kw), got {kstack.shape}")
 
+    if tpl.ndim != 2 or not tpl.size or any(d % F for d in tpl.shape):
+        raise ValueError("template must be nonempty, 2D and divisible by oversample")
     n_ker, kh, kw = kstack.shape
+    if (
+        n_ker == 0
+        or kh != kw
+        or kh % 2 != 1
+        or kh > min(tpl.shape)
+        or not np.all(np.isfinite(kstack))
+    ):
+        raise ValueError(
+            "kernels must be finite, nonempty, odd, square and fit within template"
+        )
+    finite = np.isfinite(tpl)
+    contaminated = None
+    if not np.all(finite):
+        radius = kh // 2
+        support = maximum_filter(~finite, size=kh, mode="constant", cval=0)
+        stop = -radius if radius else None
+        contaminated = support[radius:stop, radius:stop]
+        tpl = np.where(finite, tpl, 0.0)
     half_r = kw // 2
     hr_ny, hr_nx = tpl.shape
     lr_ny, lr_nx = hr_ny // F, hr_nx // F
@@ -141,6 +174,8 @@ def precompute_basis_lr_maps(
         F_k = rfft2(kstack[k], s=fshape)
         full = irfft2(F_tpl * F_k, s=fshape)
         conv = np.ascontiguousarray(full[valid_idx], dtype=np.float64)
+        if contaminated is not None:
+            conv[contaminated] = np.nan
         return _basis_lr_from_conv(conv, half_r, F, lr_ny, lr_nx)
 
     if n_workers <= 1 or n_ker < 4:

@@ -18,8 +18,8 @@ Default: C extension
    # equivalent to use_c_extension=True
    results = hp.run_pipeline()
 
-This is the stable path shipped on ``main`` (0.1.x). Prefer it for production
-workflows unless you need a pure-Python-only feature.
+This is the default backend. Validate the candidate on your own data before
+using it in production.
 
 Opt-in: pure Python
 -------------------

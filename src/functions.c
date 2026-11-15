@@ -4,6 +4,8 @@
 // #include<malloc.h>
 #include<stdlib.h>
 #include<ctype.h>
+#include<limits.h>
+#include<float.h>
 
 #include "globals.h"
 #include "functions.h"
@@ -21,56 +23,45 @@ code.
 */
 
 /* armin */ 
-void loadxyfile(hotpants_state_t *state, char *filename, int cmpfileflag){      
-    FILE *xyfile;
-    int Nalloc,c;
+void loadxyfile(hotpants_state_t *state, char *filename, int cmpfileflag) {
+    FILE *file = fopen(filename, "r");
+    if (!file) { state->error = 2; return; }
     char line[SCRLEN];
-    xyfile   = fopen(filename, "r");
-    if (state->verbose > 0) fprintf(stderr, "WARNING : INPUT FORMAT HARDCODED : X=1, Y=2; 1-indexed coordinates\n");
-    if (cmpfileflag) {
-        for (;;){
-            c=getc(xyfile);
-            if (c== EOF) break;	 
-            if (c=='\n') break;	  
+    if (cmpfileflag && !fgets(line, sizeof(line), file)) { fclose(file); return; }
+    int cap = 100, count = 0;
+    float *xs = malloc(cap * sizeof(float)), *ys = malloc(cap * sizeof(float));
+    if (!xs || !ys) goto fail;
+    while (fgets(line, sizeof(line), file)) {
+        float x, y;
+        if (sscanf(line, "%f %f", &x, &y) != 2 || !isfinite(x) || !isfinite(y)) continue;
+        if (count == cap) {
+            if (cap > INT_MAX / 2) goto fail;
+            cap *= 2;
+            float *next = realloc(xs, (size_t)cap * sizeof(float));
+            if (!next) goto fail;
+            xs = next;
+            next = realloc(ys, (size_t)cap * sizeof(float));
+            if (!next) goto fail;
+            ys = next;
         }
+        xs[count] = x - 1; ys[count++] = y - 1;
     }
-    Nalloc=100;
-    if ( !(state->xcmp = (float *)malloc(Nalloc*sizeof(float))) ||
-         !(state->ycmp = (float *)malloc(Nalloc*sizeof(float))) )
-        exit(1);
-    state->Ncmp=0;
-    while(fgets(line, SCRLEN, xyfile) != NULL) {
-        /* reallocate if necessary */
-        if (state->Ncmp==Nalloc){
-            Nalloc+=100;
-            state->xcmp  = (float *)realloc(state->xcmp, Nalloc *sizeof(float));
-            state->ycmp  = (float *)realloc(state->ycmp, Nalloc *sizeof(float));
-        }
-        
-        /* skip poorly formatted lines... */
-        if (isalpha(line[0])) continue;
-        if (sscanf(line, "%f %f", &state->xcmp[state->Ncmp], &state->ycmp[state->Ncmp]) == 2) {
-            state->Ncmp++;
-        }
-    }
-    fclose(xyfile);
-    
-    /* take care of 1-indexing, our arrays are 0-indexed */
-    for (c = 0; c < state->Ncmp; c++) {
-        state->xcmp[c] -= 1;
-        state->ycmp[c] -= 1;
-    }
+    fclose(file); free(state->xcmp); free(state->ycmp);
+    state->xcmp = xs; state->ycmp = ys; state->Ncmp = count;
+    return;
+fail:
+    free(xs); free(ys); fclose(file); state->error = 1;
 }
 
 /*armin*/
 void savexy(hotpants_state_t *state, stamp_struct *stamps, int nStamps, long xmin, long ymin, int regioncounter){
     int  sscnt,istamp;
     FILE *xyfileused,*xyfileall,*xyfileskipped;
-    char xyfilenameall[1000];
-    char xyfilenameskipped[1000];
+    char xyfilenameall[1010];
+    char xyfilenameskipped[1010];
     
-    sprintf(xyfilenameall,"%s.all",state->xyfilename);
-    sprintf(xyfilenameskipped,"%s.skipped",state->xyfilename);
+    snprintf(xyfilenameall,sizeof(xyfilenameall),"%.999s.all",state->xyfilename);
+    snprintf(xyfilenameskipped,sizeof(xyfilenameskipped),"%.999s.skipped",state->xyfilename);
     
     if (regioncounter==0) {
         xyfileused = fopen(state->xyfilename, "w");
@@ -82,6 +73,12 @@ void savexy(hotpants_state_t *state, stamp_struct *stamps, int nStamps, long xmi
         xyfileskipped = fopen(xyfilenameskipped, "a");
     }
     
+    if (!xyfileused || !xyfileall || !xyfileskipped) {
+        if (xyfileused) fclose(xyfileused);
+        if (xyfileall) fclose(xyfileall);
+        if (xyfileskipped) fclose(xyfileskipped);
+        state->error = 2; return;
+    }
     fprintf(xyfileall,    "#%4s %4s\n", "X", "Y");    
     fprintf(xyfileused,   "#%4s %4s\n", "X", "Y");    
     fprintf(xyfileskipped,"#%4s %4s\n", "X", "Y");
@@ -119,46 +116,47 @@ int allocateStamps(hotpants_state_t *state, stamp_struct *stamps, int nStamps) {
     
     nbgVectors = ((state->bgOrder + 1) * (state->bgOrder + 2)) / 2;
     
+    if (!stamps && nStamps > 0) return 1;
     if (stamps) {
         for (i = 0; i < nStamps; i++) {
             
             /* **************************** */
             if(!(stamps[i].vectors = (double **)calloc((state->nCompKer+nbgVectors), sizeof(double *))))
-                return 1;
+                goto fail;
             
             for (j = 0; j < state->nCompKer + nbgVectors; j++) {
                 if(!(stamps[i].vectors[j] = (double *)calloc(state->fwKSStamp*state->fwKSStamp, sizeof(double))))
-                    return 1;
+                    goto fail;
             }
             
             /* **************************** */
             
             if (!(stamps[i].krefArea      = (double *)calloc(state->fwKSStamp*state->fwKSStamp, sizeof(double))))
-                return 1;
+                goto fail;
             
             /* **************************** */
             
             if (!(stamps[i].mat    = (double **)calloc(state->nC, sizeof(double *))))
-                return 1;
+                goto fail;
             
             for (j = 0; j < state->nC; j++)
                 if ( !(stamps[i].mat[j] = (double *)calloc(state->nC, sizeof(double))) )
-                    return 1;
+                    goto fail;
             
             /* **************************** */
             
             if (!(stamps[i].xss = (int *)calloc(state->nKSStamps, sizeof(int))))
-                return 1;
+                goto fail;
             
             /* **************************** */
             
             if (!(stamps[i].yss = (int *)calloc(state->nKSStamps, sizeof(int))))
-                return 1;
+                goto fail;
             
             /* **************************** */
             
             if (!(stamps[i].scprod = (double *)calloc(state->nC, sizeof(double))))
-                return 1;
+                goto fail;
             
             /* **************************** */
             
@@ -172,6 +170,10 @@ int allocateStamps(hotpants_state_t *state, stamp_struct *stamps, int nStamps) {
         }
     }
     return 0;
+fail:
+    freeStampMem(state, stamps, nStamps);
+    state->error = 1;
+    return 1;
 }
 
 
@@ -199,6 +201,7 @@ void buildStamps(hotpants_state_t *state, int sXMin, int sXMax, int sYMin, int s
         
         if (ctStamps[*ntS].nss == 0) {
             refArea = (float *)calloc(sPixX*sPixY, sizeof(float));
+            if (!refArea) { state->error = 1; return; }
             
             /* temp : store the whole stamp in refArea */
             cutStamp(tRData, refArea, state->rPixX, sXMin-rXBMin, sYMin-rYBMin,
@@ -221,6 +224,7 @@ void buildStamps(hotpants_state_t *state, int sXMin, int sXMax, int sYMin, int s
         
         if (ciStamps[*niS].nss == 0) {
             refArea = (float *)calloc(sPixX*sPixY, sizeof(float));
+            if (!refArea) { state->error = 1; return; }
             
             /* store the whole of the stamp in .refArea */
             cutStamp(iRData, refArea, state->rPixX, sXMin-rXBMin, sYMin-rYBMin,
@@ -277,7 +281,7 @@ void buildStamps(hotpants_state_t *state, int sXMin, int sXMax, int sYMin, int s
                         
                         for (k = xmax-state->hwKSStamp; k <= xmax+state->hwKSStamp; k++) {
                             /*xr2 = k + ctStamps[*ntS].x0;*/
-                            nr2 = l+state->rPixX*k;
+                            nr2 = k+state->rPixX*l;
                             
                             /*if ((k > 0) && (k < sPixX) && (l > 0) && (l < sPixY))*/
                             if (nr2 >= 0 && nr2 < state->rPixX*state->rPixY)
@@ -330,7 +334,7 @@ void buildStamps(hotpants_state_t *state, int sXMin, int sXMax, int sYMin, int s
                         for (k = xmax-state->hwKSStamp; k <= xmax+state->hwKSStamp; k++) {
                             /*xr2 = k + ciStamps[*niS].x0;*/
                             /*nr2 = xr2+state->rPixX*yr2;*/
-                            nr2 = l+state->rPixX*k;
+                            nr2 = k+state->rPixX*l;
                             
                             /*if ((k > 0) && (k < sPixX) && (l > 0) && (l < sPixY))*/
                             if (nr2 >= 0 && nr2 < state->rPixX*state->rPixY)
@@ -446,8 +450,11 @@ double checkPsfCenter(hotpants_state_t *state, float *iData, int imax, int jmax,
     
     /* (5). after centroiding, re-check for fill/sat values and overlap (a little inefficient) */
     /* zero tolerance for bad pixels! */
+    if (!isfinite(sky)) return 0.0;
+    if (!isfinite(invdsky) || invdsky <= 0)
+        invdsky = 1.0 / (FLT_EPSILON * fmax(1.0, fabs(sky)));
     brk   = 0;
-    
+
     /* since we have zero tolerance for bad pixels, the sum
        of all the pixels in this box can be compared to the
        sum of all the pixels in the other boxes.  rank on
@@ -515,7 +522,9 @@ int getPsfCenters(hotpants_state_t *state, stamp_struct *stamp, float *iData, in
     /* 0xff, but 0x40 is OK = 0xbf */
     bbit    = bbit1 | bbit2 | 0xbf;
     sky     = stamp->mode;
-    invdsky = 1. / stamp->fwhm;
+    if (!isfinite(sky) || !isfinite(stamp->fwhm)) return 1;
+    double noise_floor = fmax(stamp->fwhm, FLT_EPSILON * fmax(1.0, fabs(sky)));
+    invdsky = 1. / noise_floor;
     
     /* the highest peak in the image, period, in case all else fails */
     /* default to center of stamp */
@@ -531,13 +540,16 @@ int getPsfCenters(hotpants_state_t *state, stamp_struct *stamp, float *iData, in
     
     /* as low as we will go */
     /* was a 2 here before version 4.1.6 */
-    floor = sky + state->kerFitThresh * stamp->fwhm;
+    floor = sky + state->kerFitThresh * noise_floor;
     
-    qs    = (int *)calloc(xLen*yLen/(state->hwKSStamp), sizeof(int));
-    xloc  = (int *)calloc(xLen*yLen/(state->hwKSStamp), sizeof(int));
-    yloc  = (int *)calloc(xLen*yLen/(state->hwKSStamp), sizeof(int));
-    peaks = (double *)calloc(xLen*yLen/(state->hwKSStamp), sizeof(double));
+    qs    = (int *)calloc((xLen*yLen/state->hwKSStamp > 2*state->nKSStamps ? xLen*yLen/state->hwKSStamp : 2*state->nKSStamps), sizeof(int));
+    xloc  = (int *)calloc((xLen*yLen/state->hwKSStamp > 2*state->nKSStamps ? xLen*yLen/state->hwKSStamp : 2*state->nKSStamps), sizeof(int));
+    yloc  = (int *)calloc((xLen*yLen/state->hwKSStamp > 2*state->nKSStamps ? xLen*yLen/state->hwKSStamp : 2*state->nKSStamps), sizeof(int));
+    peaks = (double *)calloc((xLen*yLen/state->hwKSStamp > 2*state->nKSStamps ? xLen*yLen/state->hwKSStamp : 2*state->nKSStamps), sizeof(double));
     
+    if (!qs || !xloc || !yloc || !peaks) {
+        free(qs); free(xloc); free(yloc); free(peaks); state->error = 1; return 1;
+    }
     brk  = 0;
     pcnt = 0;
     fcnt = 2 * state->nKSStamps; /* maximum number of stamps to find */
@@ -735,10 +747,11 @@ void getNoiseStats3(hotpants_state_t *state, float *data, float *noise, double *
             (fabs(ddat) <= ZEROVAL))
             continue;
         
+        if (!isfinite(ddat) || !isfinite(noise[i]) || noise[i] <= 0) continue;
         ndat  = 1. / noise[i];
         
         n    += 1;
-        nsum += ddat*ddat * ndat*ndat;
+        nsum += (double)ddat * ddat * ndat * ndat;
     }
     if (n > 1) {
         *nncount = n;
@@ -781,14 +794,21 @@ int getStampStats3(hotpants_state_t *state, float *data,
     double   ssum;
     int      goodcnt;
     int      idum;
-    float    *sdat;
-    double   *work;
+    float    *sdat = NULL;
+    double   *work = NULL;
     
     int      nstat=100;
     float    ufstat=0.9;
     float    mfstat=0.5;
     
     
+    /* All output pointers are optional; initialize even on early failure. */
+    double unused[7];
+    if (!sum) sum = &unused[0]; if (!mean) mean = &unused[1];
+    if (!median) median = &unused[2]; if (!mode) mode = &unused[3];
+    if (!sd) sd = &unused[4]; if (!fwhm) fwhm = &unused[5];
+    if (!lfwhm) lfwhm = &unused[6];
+    *sum = *mean = *median = *mode = *sd = *fwhm = *lfwhm = NAN;
     npts = nPixX * nPixY;
     if (npts < nstat)
         return 4;
@@ -796,6 +816,7 @@ int getStampStats3(hotpants_state_t *state, float *data,
     /* fprintf(stderr, "DOINK!  %d %d %f\n", x0Reg, y0Reg, data[0]); */
     if ( !(sdat = (float *)calloc(npts, sizeof(float))) ||
          !(work = (double *)calloc(nstat, sizeof(double)))) {
+        free(sdat); free(work); state->error = 1;
         return (1);
     }
     
@@ -817,11 +838,12 @@ int getStampStats3(hotpants_state_t *state, float *data,
         
         if (((umask > 0) && (!(mdat & umask))) ||
             ((smask > 0) &&   (mdat & smask))  ||
-            (fabs(rdat) <= ZEROVAL))
+            (fabs(rdat) <= ZEROVAL) || !isfinite(rdat))
             i--;
         else
             work[i] = rdat;
     }
+    if (i == 0) { free(sdat); free(work); return 2; }
     qsort(work, i, sizeof(double), flcomp);
     npts = i;
     
@@ -863,6 +885,10 @@ int getStampStats3(hotpants_state_t *state, float *data,
     free(sdat);
     
     /* save some speed */
+    if (!isfinite(*sd) || *sd <= 0 || !isfinite(binsize) || binsize <= 0) {
+        *mode = *median = *mean; *sum = fabs(*mean) * goodcnt;
+        *fwhm = *lfwhm = 0; free(work); return 3;
+    }
     isd = 1. / (*sd);
     
     /*** DO ONLY ONCE! ***/
@@ -965,10 +991,14 @@ int getStampStats3(hotpants_state_t *state, float *data,
             sumx  += bins[i];
             sumxx += i*bins[i];
         }
+        if (sumx <= 0 || !isfinite(sumxx)) {
+            bin1 -= 128.0 * binsize; binsize *= 2.0; tries++; continue;
+        }
         mode_bin = sumxx / sumx + 0.5; /*add 0.5 to give middle of bin*/
         *mode = bin1 + binsize * (mode_bin - 1.);
         
         /*find the percentile of the mode*/
+        if (!isfinite(mode_bin) || mode_bin < 0 || mode_bin >= 256) { free(work); return 1; }
         imax = floor(mode_bin);
         for (i = 0, sumx = 0.; i < imax; sumx += bins[i++]);
         sumx += bins[imax] * (mode_bin-imax); /*interpolate fractional bin*/
@@ -1038,6 +1068,8 @@ int sigma_clip(hotpants_state_t *state, float *data, int count, double *mean, do
     }
     
     smask = (char *)calloc(count, sizeof(char));
+    if (!smask) { state->error = 1; *mean = *stdev = NAN; return 1; }
+    if (maxiter < 1) maxiter = 1;
     /*for (i=0; i<count; i++) smask[i] = 0;*/
     
     cnt  = 0;
@@ -1053,7 +1085,7 @@ int sigma_clip(hotpants_state_t *state, float *data, int count, double *mean, do
             if (!(smask[i])) {
                 d       = data[i];
                 *mean  += d;
-                *stdev += d*d;
+                *stdev += (double)d * (double)d;
             }
         }
         
@@ -1068,7 +1100,7 @@ int sigma_clip(hotpants_state_t *state, float *data, int count, double *mean, do
         
         if (ncnt > 1) {
             *stdev = *stdev - ncnt * (*mean) * (*mean);
-            *stdev = sqrt(*stdev / (double)(ncnt - 1));
+            *stdev = sqrt(fmax(0.0, *stdev) / (double)(ncnt - 1));
         }
         else {
             *stdev = MAXVAL;
@@ -1077,6 +1109,7 @@ int sigma_clip(hotpants_state_t *state, float *data, int count, double *mean, do
         }
         
         ncnt   = 0;
+        if (*stdev == 0) break;
         istdev = 1. / (*stdev);
         for (i=0; i<count; i++) {
             if (!(smask[i])) {
@@ -1105,10 +1138,11 @@ float *calculateAvgNoise(hotpants_state_t *state, float *image, int *mask, int n
     double mean, stdev;
     
     
-    if ( !(data = (float *) calloc(size * size, sizeof(float))))
+    if ( !(data = (float *) calloc((2*size+1) * (2*size+1), sizeof(float))))
         return (NULL);
-    if ( !(outim = (float *) calloc(nx * ny, sizeof(float))))
-        return (NULL);
+    if ( !(outim = (float *) calloc(nx * ny, sizeof(float)))) {
+        free(data); return NULL;
+    }
     
     for (j = ny; j--; ) {
         for (i = nx; i--; ) {
@@ -1138,25 +1172,19 @@ float *calculateAvgNoise(hotpants_state_t *state, float *image, int *mask, int n
 
 
 void freeStampMem(hotpants_state_t *state, stamp_struct *stamps, int nStamps) {
-    /*****************************************************
-     * Free ctStamps allocation when ciStamps are used, vice versa
-     *****************************************************/
-    int i, j;
-    if (stamps) {
-        for (i = 0; i < nStamps; i++) {
-            for(j = 0; j < state->nCompKer + state->nBGVectors; j++) 
-                if (stamps[i].vectors[j]) free(stamps[i].vectors[j]);
-            if (stamps[i].vectors) free(stamps[i].vectors);
-            
-            for (j = 0; j < state->nC; j++) 
-                if (stamps[i].mat[j]) free(stamps[i].mat[j]);
-            if (stamps[i].mat) free(stamps[i].mat);
-            
-            if (stamps[i].krefArea) free(stamps[i].krefArea);
-            if (stamps[i].scprod) free(stamps[i].scprod);
-            if (stamps[i].xss) free(stamps[i].xss);
-            if (stamps[i].yss) free(stamps[i].yss);
+    if (!stamps) return;
+    for (int i = 0; i < nStamps; i++) {
+        if (stamps[i].vectors) {
+            for (int j = 0; j < state->nCompKer + state->nBGVectors; j++) free(stamps[i].vectors[j]);
+            free(stamps[i].vectors);
         }
+        if (stamps[i].mat) {
+            for (int j = 0; j < state->nC; j++) free(stamps[i].mat[j]);
+            free(stamps[i].mat);
+        }
+        free(stamps[i].krefArea); free(stamps[i].scprod);
+        free(stamps[i].xss); free(stamps[i].yss);
+        memset(&stamps[i], 0, sizeof(stamp_struct));
     }
 }
 
@@ -1220,6 +1248,8 @@ void makeInputMask(hotpants_state_t *state, float *tData, float *iData, int *mDa
     int i;
     
     for (i = state->rPixX*state->rPixY; i--; ){
+        if (!isfinite(tData[i]) || !isfinite(iData[i])) mData[i] |= FLAG_INPUT_ISBAD | FLAG_ISNAN;
+        if (mData[i] & FLAG_INPUT_MASK) mData[i] |= FLAG_INPUT_ISBAD;
         mData[i] |= (FLAG_INPUT_ISBAD | FLAG_BAD_PIXVAL) * (tData[i] == state->fillVal  || iData[i] == state->fillVal);
         mData[i] |= (FLAG_INPUT_ISBAD | FLAG_SAT_PIXEL)  * (tData[i] >= state->tUThresh || iData[i] >= state->iUThresh);
         mData[i] |= (FLAG_INPUT_ISBAD | FLAG_LOW_PIXEL)  * (tData[i] <= state->tLThresh || iData[i] <= state->iLThresh);

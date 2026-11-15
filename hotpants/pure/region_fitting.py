@@ -28,6 +28,13 @@ def assign_region_weights(stamps, mode="uniform", cap=(0.25, 4.0)):
     """Set stamp.region_weight from npix/flux/invvar/uniform; clamp to cap."""
     mode = str(mode or "uniform").lower()
     lo, hi = (float(cap[0]), float(cap[1])) if cap is not None else (0.25, 4.0)
+    if (
+        mode not in ("uniform", "npix", "flux", "invvar")
+        or not np.isfinite(lo)
+        or not np.isfinite(hi)
+        or not 0 < lo <= hi
+    ):
+        raise ValueError("invalid region weighting mode or cap")
     if mode == "uniform" or not stamps:
         for s in stamps:
             s.region_weight = 1.0
@@ -74,7 +81,11 @@ def stamp_sigma_region(stamp, coeffs, fig_merit="v", mask=None, FLAG_INPUT_ISBAD
     if str(fig_merit).startswith("v"):
         ncut = getattr(stamp, "noise_pix", None)
         if ncut is None:
-            return float(np.sqrt(np.mean(resid[good] * resid[good]))) if np.any(good) else -1.0
+            return (
+                float(np.sqrt(np.mean(resid[good] * resid[good])))
+                if np.any(good)
+                else -1.0
+            )
         ncut = np.asarray(ncut, dtype=np.float64)
         good &= np.isfinite(ncut) & (ncut > 0)
         if not np.any(good):
@@ -148,7 +159,9 @@ def reject_region_star(
         stamp.ignore = True
         return region_map
 
-    scores = score_member_stars(stamp, coeffs, reg, fig_merit=getattr(config, "fom", "v"))
+    scores = score_member_stars(
+        stamp, coeffs, reg, fig_merit=getattr(config, "fom", "v")
+    )
     if not scores:
         stamp.ignore = True
         return region_map
@@ -192,7 +205,11 @@ def reject_region_star(
             basis_lr_maps=basis_lr_maps,
         )
 
-    if reg is not None and reg.npix >= min_npix and any(p not in reg.excluded_xy for p in reg.member_xy):
+    if (
+        reg is not None
+        and reg.npix >= min_npix
+        and any(p not in reg.excluded_xy for p in reg.member_xy)
+    ):
         if _try_fill(reg):
             _set_spatial_weights(stamp, ker_order, lr_nx, lr_ny)
             stamp.ignore = False
@@ -213,7 +230,8 @@ def reject_region_star(
         children = [
             r
             for r in region_map.regions
-            if set(r.member_xy).issubset(old_members) or (set(r.member_xy) & old_members)
+            if set(r.member_xy).issubset(old_members)
+            or (set(r.member_xy) & old_members)
         ]
         for child in children:
             stamp.region_id = child.id
@@ -356,9 +374,15 @@ def fit_kernel_regions(
                 stamp.ignore = True
         if len(local_ok) >= 3:
             k_sums = np.array([s.norm for s in local_ok], dtype=np.float64)
-            kmean, kstdev = _sigma_clip_mean_stdev(k_sums, stat_sig=stat_sig, maxiter=10)
+            kmean, kstdev = _sigma_clip_mean_stdev(
+                k_sums, stat_sig=stat_sig, maxiter=10
+            )
             for s in local_ok:
-                s.diff = abs((s.norm - kmean) / kstdev) if kstdev > 0 and kstdev < 1e29 else 0.0
+                s.diff = (
+                    abs((s.norm - kmean) / kstdev)
+                    if kstdev > 0 and kstdev < 1e29
+                    else 0.0
+                )
                 s.ignore = s.diff >= ker_sig_reject
 
     solution = None
@@ -384,7 +408,10 @@ def fit_kernel_regions(
             active_stamps, n_comp_ker, n_spatial, n_bg, n_params
         )
         if verbose >= 1 and iteration == 0:
-            print(f"  assemble done in {__import__('time').time() - t_asm:.1f}s; solving…", flush=True)
+            print(
+                f"  assemble done in {__import__('time').time() - t_asm:.1f}s; solving…",
+                flush=True,
+            )
         try:
             solution = _tikhonov_solve(A, b, lambda_reg=lambda_reg)
             packed = _pack_c_layout_solution(
@@ -400,7 +427,9 @@ def fit_kernel_regions(
         sigmas = []
         bad_fill = []
         for si, s in enumerate(active_stamps):
-            c = _local_coeffs_from_solution(solution, s.weights, n_comp_ker, n_spatial, n_bg)
+            c = _local_coeffs_from_solution(
+                solution, s.weights, n_comp_ker, n_spatial, n_bg
+            )
             sigma = stamp_sigma_region(s, c, fig_merit, mask, FLAG_REGION_EXCLUDE)
             if sigma < 0:
                 bad_fill.append(si)
@@ -412,7 +441,9 @@ def fit_kernel_regions(
         need_refit = False
         for si in bad_fill:
             s = active_stamps[si]
-            c = _local_coeffs_from_solution(solution, s.weights, n_comp_ker, n_spatial, n_bg)
+            c = _local_coeffs_from_solution(
+                solution, s.weights, n_comp_ker, n_spatial, n_bg
+            )
             reject_region_star(
                 s,
                 region_map,
@@ -432,11 +463,15 @@ def fit_kernel_regions(
             )
             need_refit = True
 
-        good_sigmas = np.array([sg for sg in sigmas if np.isfinite(sg)], dtype=np.float64)
+        good_sigmas = np.array(
+            [sg for sg in sigmas if np.isfinite(sg)], dtype=np.float64
+        )
         if good_sigmas.size == 0:
             break
 
-        mean_sig, std_sig = _sigma_clip_mean_stdev(good_sigmas, stat_sig=stat_sig, maxiter=10)
+        mean_sig, std_sig = _sigma_clip_mean_stdev(
+            good_sigmas, stat_sig=stat_sig, maxiter=10
+        )
         fit_stats["meansig"] = mean_sig
         fit_stats["scatter"] = std_sig
         fit_stats["n_skipped"] = sum(1 for s in valid_stamps if s.ignore)
@@ -488,7 +523,9 @@ def fit_kernel_regions(
         for s in final_active_stamps:
             if s.ignore:
                 continue
-            c = _local_coeffs_from_solution(solution, s.weights, n_comp_ker, n_spatial, n_bg)
+            c = _local_coeffs_from_solution(
+                solution, s.weights, n_comp_ker, n_spatial, n_bg
+            )
             s.convolved_model_global = c @ s.vectors
 
     for s in final_active_stamps:

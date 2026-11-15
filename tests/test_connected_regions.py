@@ -25,7 +25,9 @@ def _bases(rkernel=5):
 def test_build_and_split_by_diameter():
     xy = np.array([[10.0, 10.0], [12.0, 10.0], [50.0, 50.0]])
     sci = np.ones((80, 80), dtype=np.float32)
-    rmap = build_connected_regions(xy, (80, 80), rss=3, max_diameter=40.0, flux_image=sci)
+    rmap = build_connected_regions(
+        xy, (80, 80), rss=3, max_diameter=40.0, flux_image=sci
+    )
     assert len(rmap.regions) == 2
     multi = next(r for r in rmap.regions if len(r.member_xy) == 2)
     assert multi.npix > (2 * 3 + 1) ** 2
@@ -56,7 +58,9 @@ def test_populate_region_vectors_matches_mask():
     tpl = sci.copy()
     rmap = build_connected_regions(xy, (ny, nx), rss=rss, flux_image=sci)
     reg = rmap.regions[0]
-    cfg = HotpantsConfig(nx=nx, ny=ny, rss=rss, rkernel=5, ko=0, bgo=0, deg_fixe=[2], sigma_gauss=[1.0])
+    cfg = HotpantsConfig(
+        nx=nx, ny=ny, rss=rss, rkernel=5, ko=0, bgo=0, deg_fixe=[2], sigma_gauss=[1.0]
+    )
     cfg.region_min_npix = 9
     stamp = Stamp(32, 32)
     ok = populate_region_vectors(stamp, tpl, sci, rmap.labels, reg, cfg, _bases(), 1)
@@ -75,7 +79,9 @@ def test_padded_bbox_rejects_near_edge():
     if not rmap.regions:
         return
     reg = rmap.regions[0]
-    cfg = HotpantsConfig(nx=nx, ny=ny, rss=rss, rkernel=8, ko=0, bgo=0, deg_fixe=[1], sigma_gauss=[1.0])
+    cfg = HotpantsConfig(
+        nx=nx, ny=ny, rss=rss, rkernel=8, ko=0, bgo=0, deg_fixe=[1], sigma_gauss=[1.0]
+    )
     cfg.region_min_npix = 5
     stamp = Stamp(6, 20)
     ok = populate_region_vectors(stamp, sci, sci, rmap.labels, reg, cfg, _bases(8), 1)
@@ -110,7 +116,9 @@ def test_blame_picks_corrupt_star():
 
     rmap = build_connected_regions(xy, (ny, nx), rss=rss, flux_image=sci)
     reg = rmap.regions[0]
-    cfg = HotpantsConfig(nx=nx, ny=ny, rss=rss, rkernel=5, ko=0, bgo=0, deg_fixe=[1], sigma_gauss=[1.0])
+    cfg = HotpantsConfig(
+        nx=nx, ny=ny, rss=rss, rkernel=5, ko=0, bgo=0, deg_fixe=[1], sigma_gauss=[1.0]
+    )
     cfg.region_min_npix = 20
     stamp = Stamp(int(reg.x_flux), int(reg.y_flux))
     assert populate_region_vectors(
@@ -212,11 +220,28 @@ def _masked_blob_run(add_blob):
         sci[57:60, 62:65] += 40.0  # unmodelled light, under the caller's mask only
     cat = np.array([[x + 1.0, y + 1.0] for x, y in stars], dtype=np.float32)
     cfg = HotpantsConfig(
-        nx=nx, ny=ny, rss=4, rkernel=5, ko=1, bgo=0, force_convolve="t", stamp_mode="connected_regions",
-        region_weight="uniform", region_min_npix=20, deg_fixe=[2], sigma_gauss=[1.0], kf_spread_mask1=0.0,
-        iuthresh=1e9, tuthresh=1e9, iuktresh=1e9, tuktresh=1e9, verbose=0,
+        nx=nx,
+        ny=ny,
+        rss=4,
+        rkernel=5,
+        ko=1,
+        bgo=0,
+        force_convolve="t",
+        stamp_mode="connected_regions",
+        region_weight="uniform",
+        region_min_npix=20,
+        deg_fixe=[2],
+        sigma_gauss=[1.0],
+        kf_spread_mask1=0.0,
+        iuthresh=1e9,
+        tuthresh=1e9,
+        iuktresh=1e9,
+        tuktresh=1e9,
+        verbose=0,
     )
-    hp = Hotpants(tpl, sci, i_mask=i_mask, star_catalog=cat, config=cfg, use_c_extension=False)
+    hp = Hotpants(
+        tpl, sci, i_mask=i_mask, star_catalog=cat, config=cfg, use_c_extension=False
+    )
     hp.find_stamps()
     n_regions = len(hp.results["region_map"].regions)
     hp.fit_and_select_direction()

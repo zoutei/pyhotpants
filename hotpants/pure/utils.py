@@ -1,4 +1,3 @@
-
 import numpy as np
 from numba import njit, typed
 import scipy.ndimage as ndimage
@@ -7,8 +6,15 @@ import scipy.ndimage as ndimage
 # Numba-Accelerated Cutout Functions (Matches functions.py)
 # =========================================================
 
-@njit(cache=True)
-def cut_substamp_from_image(image: np.ndarray, x_center: int, y_center: int, half_width: int, fill_value: float = np.nan) -> np.ndarray:
+
+@njit(boundscheck=True, cache=True)
+def cut_substamp_from_image(
+    image: np.ndarray,
+    x_center: int,
+    y_center: int,
+    half_width: int,
+    fill_value: float = np.nan,
+) -> np.ndarray:
     """
     Extracts a square substamp from a larger image, equivalent to the C 'cutSStamp' logic.
     """
@@ -29,25 +35,37 @@ def cut_substamp_from_image(image: np.ndarray, x_center: int, y_center: int, hal
 
     # Output array
     full_cutout = np.full((full_width, full_width), fill_value, dtype=image.dtype)
-    
+
     # Calculate paste coordinates
     paste_y_start = y_start_clipped - y_start
     paste_y_end = paste_y_start + (y_end_clipped - y_start_clipped)
     paste_x_start = x_start_clipped - x_start
     paste_x_end = paste_x_start + (x_end_clipped - x_start_clipped)
-    
+
     # Copy data if there is an overlap
     if paste_y_end > paste_y_start and paste_x_end > paste_x_start:
-         full_cutout[paste_y_start:paste_y_end, paste_x_start:paste_x_end] = \
-             image[y_start_clipped:y_end_clipped, x_start_clipped:x_end_clipped]
+        full_cutout[paste_y_start:paste_y_end, paste_x_start:paste_x_end] = image[
+            y_start_clipped:y_end_clipped, x_start_clipped:x_end_clipped
+        ]
 
     return full_cutout
 
-@njit(cache=True)
-def process_all_substamps_numba(image: np.ndarray, x_coords: np.ndarray, y_coords: np.ndarray, half_width: int, fill_value: float = np.nan) -> np.ndarray:
+
+@njit(boundscheck=True, cache=True)
+def process_all_substamps_numba(
+    image: np.ndarray,
+    x_coords: np.ndarray,
+    y_coords: np.ndarray,
+    half_width: int,
+    fill_value: float = np.nan,
+) -> np.ndarray:
     """
     Processes a batch of substamps using Numba. Returns a 3D array of cutouts.
     """
+    if len(x_coords) != len(y_coords) or half_width < 0:
+        raise ValueError(
+            "coordinate lengths must agree and half_width must be nonnegative"
+        )
     num_substamps = len(x_coords)
     full_width = 2 * half_width + 1
     # Store as 3D array for easier handling than list
@@ -56,19 +74,23 @@ def process_all_substamps_numba(image: np.ndarray, x_coords: np.ndarray, y_coord
     for i in range(num_substamps):
         x_center = int(round(x_coords[i]))
         y_center = int(round(y_coords[i]))
-        all_cutouts[i] = cut_substamp_from_image(image, x_center, y_center, half_width, fill_value)
+        all_cutouts[i] = cut_substamp_from_image(
+            image, x_center, y_center, half_width, fill_value
+        )
 
     return all_cutouts
+
 
 # =========================================================
 # Noise Calculation (Matches getStampStats3)
 # =========================================================
 
+
 def calculate_noise(data, mask=None, n_stat=100, max_iter=5):
     """
     Calculate noise statistics using histogram-based mode estimation.
     Matches logic from getStampStats3 in functions.c.
-    
+
     Parameters
     ----------
     data : ndarray
@@ -77,7 +99,7 @@ def calculate_noise(data, mask=None, n_stat=100, max_iter=5):
         Boolean mask (True = bad pixel).
     n_stat : int
         Minimum number of points required.
-        
+
     Returns
     -------
     sigma : float
@@ -89,96 +111,104 @@ def calculate_noise(data, mask=None, n_stat=100, max_iter=5):
         valid_data = data[~mask]
     else:
         valid_data = data.flatten()
-        
+
     valid_data = valid_data[np.isfinite(valid_data)]
     n_pts = len(valid_data)
-    
+
     if n_pts < n_stat:
-        return 0.0, 0.0 # Or error? C returns error code.
-    
+        return 0.0, 0.0  # Or error? C returns error code.
+
     # 1. Initial 100-point random sample to estimate bin size (functions.c:806)
     # in Python we can just use a larger sample or all data if small
     sample_size = min(n_pts, 1000)
-    sample = np.random.choice(valid_data, size=sample_size, replace=False)
+    sample = np.random.default_rng(666).choice(
+        valid_data, size=sample_size, replace=False
+    )
     sample.sort()
-    
+
     # ufstat=0.9, mfstat=0.5
     u_val = sample[int(0.9 * len(sample))]
     m_val = sample[int(0.5 * len(sample))]
-    
-    binsize = (u_val - m_val) / 100.0 # "nstat=100" in C
+
+    binsize = (u_val - m_val) / 100.0  # "nstat=100" in C
     bin1 = m_val - 128.0 * binsize
-    
+
     # Sigma clip pre-histogram (functions.c:858)
     # We use scipy-like iterative sigma clipping
+    current_data = valid_data
     try:
         current_data = valid_data
         mean_val = np.mean(current_data)
         std_val = np.std(current_data)
-        
+
         for _ in range(max_iter):
-            mask_clip = np.abs(current_data - mean_val) < 3.0 * std_val # statSig=3.0 usually? C uses 10? No, statSig default 3?
+            if std_val == 0:
+                return 0.0, float(mean_val)
+            mask_clip = (
+                np.abs(current_data - mean_val) < 3.0 * std_val
+            )  # statSig=3.0 usually? C uses 10? No, statSig default 3?
             if np.all(mask_clip):
                 break
             current_data = current_data[mask_clip]
             mean_val = np.mean(current_data)
             std_val = np.std(current_data)
-    except:
-        pass
-        
+    except (ValueError, FloatingPointError):
+        return 0.0, float(np.median(valid_data))
+
     # Re-binning Loop (functions.c:871)
     # Simplifying: We can use numpy.histogram which is efficient
-    
+
     # 256 bins
     # range: [bin1, bin1 + 256*binsize]
-    
+
     final_binsize = binsize
     final_bin1 = bin1
-    
+
     hist_data = current_data
-    
+
     # We will skip the exact "resize bins" loop from C for brevity/speed unless strictly required,
     # as numpy histogram is robust. The C code handles dynamic range issues.
     # Assuming the sigma-clipping above cleaned the data well enough.
-    
+
     # Construct Histogram
     # "find narrowest region which holds ~10% of points"
-    
+
     # Let's use a dense histogram approach
     # C uses 256 bins. We can use more for better resolution.
-    hist, bin_edges = np.histogram(hist_data, bins=256) # Automatic range?
+    hist, bin_edges = np.histogram(hist_data, bins=256)  # Automatic range?
     # C forces specific binsize. Let's trust numpy's auto-binning or use the calculated one?
     # Using calculated one might clip data.
-    
+
     # Implementation of "Narrowest 10% Window" Mode Estimation
     # This is equivalent to finding the peak density in sorted data
     sorted_d = np.sort(hist_data)
     n = len(sorted_d)
     window_pts = int(0.1 * n)
-    
+
     if window_pts < 2:
         return 0.0, np.median(hist_data)
-    
+
     # Width of windows containing 10% of points
     widths = sorted_d[window_pts:] - sorted_d[:-window_pts]
-    
+
     # Find index of minimum width (highest density)
     min_idx = np.argmin(widths)
-    
+
     # Mode is the mean of this densest window
     mode_val = np.mean(sorted_d[min_idx : min_idx + window_pts])
-    
+
     # FWHM / Sigma estimation
     # "find the region around mode containing half the noise points" (25% to 75% centered on mode?)
-    # C logic: 
+    # C logic:
     # lower = goodcnt * 0.25; upper = goodcnt * 0.75; matches IQR logic approx.
-    # But C code calculates index sums. 
+    # But C code calculates index sums.
     # Ideally: FWHM = 1.35 * Sigma.
     # We can use IQR of the *clipped* data as a robust estimator.
     q25, q75 = np.percentile(hist_data, [25, 75])
     sigma_val = (q75 - q25) / 1.349
-    
+
     return float(sigma_val), float(mode_val)
+
 
 # =========================================================
 # Masking & Stamp Finding
@@ -196,6 +226,7 @@ FLAG_T_BAD = 0x100
 FLAG_I_BAD = 0x400
 FLAG_T_SKIP = 0x200
 FLAG_I_SKIP = 0x800
+FLAG_OUTPUT_ISBAD = 0x8000
 
 # Pixels the connected-regions path must keep out of region gates, region fits and region clipping: bad data
 # (FLAG_INPUT_ISBAD) and the caller's own t_mask / i_mask (FLAG_INPUT_MASK, set by make_input_mask). The grid stamp
@@ -210,21 +241,21 @@ def mask_pixels(image, low_thresh=None, high_thresh=None, bitmask=None):
     """
     # 0 = Good
     # 1 = Bad (FLAG_BAD_PIXVAL / FLAG_INPUT_ISBAD etc in C)
-    # In C: 
-    # tLThresh/tUThresh are checked. 
+    # In C:
+    # tLThresh/tUThresh are checked.
     # bitmask is checked.
-    
+
     mask = np.zeros(image.shape, dtype=bool)
-    
+
     if low_thresh is not None:
-        mask |= (image <= low_thresh)
-        
+        mask |= image <= low_thresh
+
     if high_thresh is not None:
-        mask |= (image >= high_thresh)
-        
+        mask |= image >= high_thresh
+
     if bitmask is not None:
-        mask |= (bitmask != 0)
-        
+        mask |= bitmask != 0
+
     return mask
 
 
@@ -303,10 +334,14 @@ def make_input_mask(
             m_data[i_mask > 0] |= FLAG_INPUT_MASK
 
         # Exact makeInputMask() predicates (NaNs do not satisfy == / >= / <= in C either).
-        m_data[(template == fill) | (image == fill)] |= FLAG_INPUT_ISBAD | FLAG_BAD_PIXVAL
+        m_data[(template == fill) | (image == fill)] |= (
+            FLAG_INPUT_ISBAD | FLAG_BAD_PIXVAL
+        )
         m_data[(template >= t_u) | (image >= i_u)] |= FLAG_INPUT_ISBAD | FLAG_SAT_PIXEL
         m_data[(template <= t_l) | (image <= i_l)] |= FLAG_INPUT_ISBAD | FLAG_LOW_PIXEL
-        m_data[np.isnan(template) | np.isnan(image)] |= FLAG_ISNAN | FLAG_INPUT_ISBAD
+        m_data[~np.isfinite(template) | ~np.isfinite(image)] |= (
+            FLAG_ISNAN | FLAG_INPUT_ISBAD
+        )
 
         spread = int(config.rkernel * getattr(config, "kf_spread_mask1", 1.0))
         s_border = int(config.rss + config.rkernel)
@@ -332,19 +367,20 @@ def make_input_mask(
         m_data[image_hr >= i_u] |= FLAG_INPUT_ISBAD | FLAG_SAT_PIXEL
         m_data[template <= t_l] |= FLAG_INPUT_ISBAD | FLAG_LOW_PIXEL
         m_data[image_hr <= i_l] |= FLAG_INPUT_ISBAD | FLAG_LOW_PIXEL
-        m_data[np.isnan(template)] |= FLAG_ISNAN | FLAG_INPUT_ISBAD
-        m_data[np.isnan(image_hr)] |= FLAG_ISNAN | FLAG_INPUT_ISBAD
+        m_data[~np.isfinite(template)] |= FLAG_ISNAN | FLAG_INPUT_ISBAD
+        m_data[~np.isfinite(image_hr)] |= FLAG_ISNAN | FLAG_INPUT_ISBAD
 
         spread = int(config.rkernel * getattr(config, "kf_spread_mask1", 1.0)) * F
         s_border = int(config.rss + config.rkernel) * F
 
+    m_data[(m_data & FLAG_INPUT_MASK) != 0] |= FLAG_INPUT_ISBAD
     spread_mask(m_data, spread)
 
-    # Border mask: hwKSStamp + hwKernel
+    # Clipped slices also handle images smaller than the masked border.
     m_data[:, :s_border] |= FLAG_T_BAD | FLAG_I_BAD
-    m_data[:, nx_hr - s_border :] |= FLAG_T_BAD | FLAG_I_BAD
-    m_data[:s_border, s_border : nx_hr - s_border] |= FLAG_T_BAD | FLAG_I_BAD
-    m_data[ny_hr - s_border :, s_border : nx_hr - s_border] |= FLAG_T_BAD | FLAG_I_BAD
+    m_data[:, max(0, nx_hr - s_border) :] |= FLAG_T_BAD | FLAG_I_BAD
+    m_data[:s_border, :] |= FLAG_T_BAD | FLAG_I_BAD
+    m_data[max(0, ny_hr - s_border) :, :] |= FLAG_T_BAD | FLAG_I_BAD
 
     return m_data
 
@@ -391,22 +427,26 @@ def _check_psf_center(
     return dmax2
 
 
-def _mark_skip_like_c(mask: np.ndarray, xmax: int, ymax: int, hw_ks: int, skip_bit: int) -> None:
+def _mark_skip_like_c(
+    mask: np.ndarray, xmax: int, ymax: int, hw_ks: int, skip_bit: int
+) -> None:
     """
     Replicate buildStamps' skip masking, including its index order:
-    nr2 = l + rPixX * k with l in ymax±hw, k in xmax±hw.
+    nr2 = k + rPixX * l with l in ymax±hw, k in xmax±hw.
     """
     ny, nx = mask.shape
     flat = mask.reshape(-1)
     n_tot = nx * ny
     for l in range(ymax - hw_ks, ymax + hw_ks + 1):
         for k in range(xmax - hw_ks, xmax + hw_ks + 1):
-            nr2 = l + nx * k
+            nr2 = k + nx * l
             if 0 <= nr2 < n_tot:
                 flat[nr2] |= skip_bit
 
 
-def find_stamps_from_catalog(template, image, mask, catalog, config, oversample: int = 1):
+def find_stamps_from_catalog(
+    template, image, mask, catalog, config, oversample: int = 1
+):
     """
     Catalog stamp search matching hotpants_ext.find_stamps + buildStamps(getCenters=0).
 
@@ -583,12 +623,16 @@ def find_stamps_from_catalog(template, image, mask, catalog, config, oversample:
     sid = 0
     for gid, (xss, yss) in enumerate(t_groups):
         for x, y in zip(xss, yss):
-            t_out.append({"substamp_id": sid, "stamp_group_id": gid, "x": int(x), "y": int(y)})
+            t_out.append(
+                {"substamp_id": sid, "stamp_group_id": gid, "x": int(x), "y": int(y)}
+            )
             sid += 1
     sid = 0
     for gid, (xss, yss) in enumerate(i_groups):
         for x, y in zip(xss, yss):
-            i_out.append({"substamp_id": sid, "stamp_group_id": gid, "x": int(x), "y": int(y)})
+            i_out.append(
+                {"substamp_id": sid, "stamp_group_id": gid, "x": int(x), "y": int(y)}
+            )
             sid += 1
     return t_out, i_out
 
@@ -621,91 +665,99 @@ def find_stamps(image, mask, n_stamps, box_size, border_width=10):
     3. Check against Mask (Zero Tolerance)
     """
     # Use max filter to find peaks
-    neighborhood_size = box_size # approximation
+    neighborhood_size = box_size  # approximation
     data_max = ndimage.maximum_filter(image, size=neighborhood_size)
-    maxima = (image == data_max)
-    
+    maxima = image == data_max
+
     # Thresholding? C uses:
     # "ignore anything with state->fillVal or zero"
     # "sort by flux"
-    
+
     # Get coordinates of maxima
     y_peaks, x_peaks = np.where(maxima)
-    
+
     candidates = []
-    
+
     h, w = image.shape
     half_box = box_size // 2
-    
+
     for y, x in zip(y_peaks, x_peaks):
         # 1. Check Mask (Point check)
         if _mask_pixel_is_bad(mask, y, x):
             continue
-            
+
         # 2. Check Borders
-        if (x < border_width or x >= w - border_width or 
-            y < border_width or y >= h - border_width):
+        if (
+            x < border_width
+            or x >= w - border_width
+            or y < border_width
+            or y >= h - border_width
+        ):
             continue
-            
+
         # 3. Check Stamp Region Mask (Zero Tolerance)
         # "check_box" logic
         x0 = max(0, x - half_box)
         x1 = min(w, x + half_box + 1)
         y0 = max(0, y - half_box)
         y1 = min(h, y + half_box + 1)
-        
+
         if _mask_region_has_bad(mask, y0, y1, x0, x1):
             continue
-            
+
         # 4. Calculate Flux (Metric)
-        flux = image[y, x] # Peak value as metric? Or sum? 
+        flux = image[y, x]  # Peak value as metric? Or sum?
         # C code `findStamps`: uses `quick_phot` (aperture sum)
         flux = np.sum(image[y0:y1, x0:x1])
-        
+
         candidates.append((flux, x, y))
-        
+
     # Sort by flux descending
     candidates.sort(key=lambda x: x[0], reverse=True)
-    
+
     # Select top N
     selected = candidates[:n_stamps]
-    
-    # Format as list of substamps / structures? 
+
+    # Format as list of substamps / structures?
     # Returning simple list of dicts or objects
     # Pure python impl usually wants objects, but for now coords
-    return [{'x': c[1], 'y': c[2], 'flux': c[0]} for c in selected]
-    
+    return [{"x": c[1], "y": c[2], "flux": c[0]} for c in selected]
+
+
 # =========================================================
 # Image Manipulation
 # =========================================================
 
-@njit(cache=True)
+
+@njit(boundscheck=True, cache=True)
 def downsample_image(image: np.ndarray, factor: int) -> np.ndarray:
     """
     Downsamples an image by summing blocks of size factor x factor.
     Assumes image dimensions are multiples of factor.
-    
+
     Parameters
     ----------
     image : ndarray
         High-resolution image.
     factor : int
         Integer downsampling factor.
-        
+
     Returns
     -------
     downsampled : ndarray
         Low-resolution image (summed).
     """
+    if factor < 1 or image.shape[0] % factor or image.shape[1] % factor:
+        raise ValueError("factor must be positive and divide the image dimensions")
     if factor == 1:
         return image
-        
+
     ny, nx = image.shape
     new_ny = ny // factor
     new_nx = nx // factor
-    
+
     downsampled = np.zeros((new_ny, new_nx), dtype=image.dtype)
-    
+
     for j in range(new_ny):
         for i in range(new_nx):
             block_sum = 0.0
@@ -715,5 +767,5 @@ def downsample_image(image: np.ndarray, factor: int) -> np.ndarray:
                 for kx in range(factor):
                     block_sum += image[y_start + ky, x_start + kx]
             downsampled[j, i] = block_sum
-            
+
     return downsampled
